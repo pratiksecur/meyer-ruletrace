@@ -26,6 +26,8 @@ def test_upload_json_and_ifc(client):
     body = (SAMPLES / "demo_research_vessel.json").read_bytes()
     d = client.post("/ruletrace/designs", headers=ENG, files={"file": ("rv.json", body)}).json()
     assert d["elements"] == 4
+    import pytest
+    pytest.importorskip("ifcopenshell")
     ifc = (SAMPLES / "demo_deck_section.ifc").read_bytes()
     d2 = client.post("/ruletrace/designs", headers=ENG, files={"file": ("deck.ifc", ifc)}).json()
     assert d2["format"] == "ifc"

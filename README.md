@@ -50,10 +50,9 @@ Also built in:
 Needs Python 3.10+.
 
 ```bash
-# 1. Vartija core (prior work)
+# 1. Vartija core (prior work) and this repo, side by side
 git clone https://github.com/sahilpimple/Vartija.git
-# 2. this repo
-git clone <this repo> meyer-ruletrace
+git clone https://github.com/pratiksecur/meyer-ruletrace.git
 cd meyer-ruletrace
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1    macOS/Linux: source .venv/bin/activate
@@ -61,6 +60,9 @@ python -m pip install -e ../Vartija/vartija-core -e ".[ifc,dev]"
 python -m pytest -q                       # all tests should pass
 python -m uvicorn ruletrace.app:app --port 8001
 ```
+
+> Install Vartija **from the cloned folder with `-e`**. `pip install git+https://...Vartija...` leaves out
+> Vartija's `config/`, `corpus/` and `seed/` folders, and the server then fails with "policy.yaml not found".
 
 Open **http://localhost:8001/ruletrace**, then *Load a sample → Demo cruise ship: Deck 7*.
 The Vartija dashboard (sources, audit, executive view) is at http://localhost:8001/dashboard.
