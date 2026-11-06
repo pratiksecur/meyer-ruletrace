@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 
 import yaml
-from vartija_core.quantities import UNITS, QuantityError, _unit_key, check_requirement, parse_quantity
+from vartija_core.quantities import QuantityError, check_requirement, parse_quantity
 
 from .model import Design, Element, Ship
 
@@ -125,11 +125,11 @@ _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, as
 
 
 def _to_unit(q_text: str, unit: str) -> float:
-    q = parse_quantity(str(q_text))
-    key = _unit_key(unit)
-    if key not in UNITS or UNITS[key][0] != q.dimension:
+    """Value of q_text expressed in unit, using only Vartija's public quantities API."""
+    q, ref = parse_quantity(str(q_text)), parse_quantity(f"1 {unit}")
+    if ref.dimension != q.dimension:
         raise QuantityError(f"cannot express {q_text} in {unit}")
-    return q.base_value / UNITS[key][1]
+    return q.base_value / ref.base_value
 
 
 class _Ctx:

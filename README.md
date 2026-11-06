@@ -42,31 +42,29 @@ Also built in:
 - `ruletrace/rules/*.yaml`: the rule pack (23 rules: SOLAS/FSS fire and escape, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
-- Built on **Vartija core** (prior work, tag `pre-event-2026-11-05`): login and roles, audit hash chain, document sources, dashboard
+- Built on **Vartija core** (prior work; feature freeze at tag `pre-event-2026-11-05`, installed from release `v0.2.0`, which only adds a packaging fix): login and roles, audit hash chain, document sources. RuleTrace uses only Vartija's public API (`create_app`, `Principal`, `current_principal`, `audit.append`, `quantities.parse_quantity` / `check_requirement`, `settings.Settings`).
 
 ## Deployment
 
 ### Local (Windows / macOS / Linux), about 5 minutes
 
-Needs Python 3.10+.
+Needs Python 3.10+ (tested on 3.13) and git.
 
 ```bash
-# 1. Vartija core (prior work) and this repo, side by side
-git clone https://github.com/sahilpimple/Vartija.git
 git clone https://github.com/pratiksecur/meyer-ruletrace.git
 cd meyer-ruletrace
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1    macOS/Linux: source .venv/bin/activate
-python -m pip install -e ../Vartija/vartija-core -e ".[ifc,drawings,dev]"
-python -m pytest -q                       # all tests should pass
+python -m pip install -e ".[ifc,drawings,dev]"   # also installs Vartija core v0.2.0 from GitHub
+python -m pytest -q                              # all tests should pass
 python -m uvicorn ruletrace.app:app --port 8001
 ```
 
-> Install Vartija **from the cloned folder with `-e`**. `pip install git+https://...Vartija...` leaves out
-> Vartija's `config/`, `corpus/` and `seed/` folders, and the server then fails with "policy.yaml not found".
-
 Open **http://localhost:8001/ruletrace**, then *Load a sample → Demo cruise ship: Deck 7*.
-The Vartija dashboard (sources, audit, executive view) is at http://localhost:8001/dashboard.
+The database (`vartija.db`) and uploads (`data/`) are created in the folder you start the server from.
+
+**Working on Vartija at the same time?** Clone it next to this repo and override the pinned copy:
+`python -m pip install -e ../Vartija/vartija-core`. Undo with `python -m pip install -e ".[ifc,drawings,dev]"`.
 
 ### Settings (environment variables)
 

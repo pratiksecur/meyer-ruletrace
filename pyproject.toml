@@ -7,7 +7,11 @@ name = "ruletrace"
 version = "0.1.0"
 description = "Check ship designs (3D models, drawings, documents) against SOLAS, MARPOL, COLREG, class rules, PVAG and ADA, and show why something is not compliant."
 requires-python = ">=3.10"
-dependencies = ["vartija-core", "pyyaml>=6", "fastapi>=0.110", "python-multipart>=0.0.9", "uvicorn>=0.27"]
+dependencies = [
+  # Vartija core (prior work), pinned to a release tag. For side-by-side development you can
+  # override it afterwards with: pip install -e ../Vartija/vartija-core
+  "vartija-core @ git+https://github.com/sahilpimple/Vartija.git@v0.2.0#subdirectory=vartija-core",
+  "pyyaml>=6", "fastapi>=0.110", "python-multipart>=0.0.9", "uvicorn>=0.27"]
 
 [project.optional-dependencies]
 ifc = ["ifcopenshell>=0.8"]

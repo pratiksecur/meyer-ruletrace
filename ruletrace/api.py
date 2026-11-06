@@ -27,7 +27,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from vartija_core import audit
-from vartija_core.api import Principal, _load_access, current_principal
+import yaml
+from vartija_core.api import Principal, current_principal
 
 from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
@@ -42,6 +43,12 @@ class CheckIn(BaseModel):
                                  description="What-if changes to the ship profile, e.g. operating_areas, keel_laid")
 
 
+def load_access(config_dir: Path) -> dict:
+    """Role -> view mapping (Vartija's config/access.yaml). Read here so RuleTrace uses no private Vartija API."""
+    p = Path(config_dir) / "access.yaml"
+    return (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
+
+
 def _rules_sha(rules) -> str:
     return hashlib.sha256(json.dumps([r.__dict__ for r in rules], default=str, sort_keys=True).encode()).hexdigest()
 
@@ -49,7 +56,7 @@ def _rules_sha(rules) -> str:
 def make_router(app) -> APIRouter:
     settings = app.state.settings
     store = Path(settings.upload_dir) / "ruletrace" / "designs"
-    access = _load_access(settings.config_dir)
+    access = load_access(settings.config_dir)
     router = APIRouter(prefix="/ruletrace", tags=["ruletrace"])
 
     def engineer(who: Principal = Depends(current_principal)) -> Principal:
