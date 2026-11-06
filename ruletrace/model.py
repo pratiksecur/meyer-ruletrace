@@ -32,6 +32,9 @@ class Ship:
     flag: str = ""
     operating_areas: list[str] = field(default_factory=list)
     notes: str = ""
+    # True when the design covers the whole ship (e.g. a full general arrangement). Rules that check
+    # that something EXISTS anywhere on board only run on complete arrangements, never on partial models.
+    complete_arrangement: bool = False
 
     @property
     def is_passenger_ship(self) -> bool:
@@ -66,6 +69,7 @@ class Design:
     source_format: str = "json"
     source_file: str = ""
     expected: list[dict] = field(default_factory=list)   # labelled answers, for evaluation only
+    interpretation: dict = field(default_factory=dict)  # how a drawing/model was read (shown to the engineer)
 
     def by_id(self, element_id: str) -> Element | None:
         return next((e for e in self.elements if e.id == element_id), None)
@@ -89,7 +93,8 @@ def _ship(d: dict) -> Ship:
             length_m=float(d.get("length_m", 0)), breadth_m=float(d.get("breadth_m", 0)),
             gross_tonnage=float(d.get("gross_tonnage", 0)),
             keel_laid=date.fromisoformat(kl) if kl else None, flag=str(d.get("flag", "")),
-            operating_areas=[str(a) for a in d.get("operating_areas", [])], notes=str(d.get("notes", "")))
+            operating_areas=[str(a) for a in d.get("operating_areas", [])], notes=str(d.get("notes", "")),
+            complete_arrangement=bool(d.get("complete_arrangement", False)))
     except (KeyError, ValueError, TypeError) as exc:
         raise DesignError(f"invalid ship profile: {exc}") from exc
     if ship.ship_type not in SHIP_TYPES:
@@ -116,7 +121,7 @@ def design_from_dict(d: dict, source_file: str = "") -> Design:
                                 source=str(raw.get("source", source_file))))
     return Design(ship=_ship(d["ship"]), elements=elements, title=str(d.get("title", "")),
                   source_format=str(d.get("source_format", "json")), source_file=source_file,
-                  expected=list(d.get("expected", [])))
+                  expected=list(d.get("expected", [])), interpretation=dict(d.get("interpretation") or {}))
 
 
 def load_design(path: Path) -> Design:
@@ -124,4 +129,7 @@ def load_design(path: Path) -> Design:
     if path.suffix.lower() == ".ifc":
         from .ifc_import import design_from_ifc
         return design_from_ifc(path)
+    if path.suffix.lower() == ".pdf":
+        from .ga_import import design_from_ga_pdf
+        return design_from_ga_pdf(path)
     return design_from_dict(json.loads(path.read_text(encoding="utf-8")), source_file=path.name)

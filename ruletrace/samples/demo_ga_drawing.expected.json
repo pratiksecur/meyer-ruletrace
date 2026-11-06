@@ -1,0 +1,32 @@
+{
+  "ship_overrides": {
+    "keel_laid": "2025-06-01"
+  },
+  "expected": [
+    {
+      "rule_id": "GA-CONSISTENCY-DECK-DOUBLES",
+      "element_id": "DECL-SHE",
+      "status": "fail"
+    },
+    {
+      "rule_id": "GA-CONSISTENCY-TOTAL-BERTHS",
+      "element_id": null,
+      "status": "fail"
+    },
+    {
+      "rule_id": "MLC-A3.1-12-HOSPITAL",
+      "element_id": null,
+      "status": "fail"
+    },
+    {
+      "rule_id": "MLC-A3.1-9-DOUBLE-CABIN-AREA-SPS",
+      "element_id": "CAB-SHE-06",
+      "status": "fail"
+    },
+    {
+      "rule_id": "MLC-A3.1-9-SINGLE-CABIN-AREA",
+      "element_id": "CAB-SHE-04",
+      "status": "fail"
+    }
+  ]
+}

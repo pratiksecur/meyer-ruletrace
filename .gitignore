@@ -4,3 +4,6 @@ __pycache__/
 *.db
 data/
 .venv/
+# third-party drawings stay out of git (owners' notices); the synthetic sample is allowed
+*.pdf
+!ruletrace/samples/demo_ga_drawing.pdf

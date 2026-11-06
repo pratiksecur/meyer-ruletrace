@@ -98,6 +98,13 @@ def applicability(rule: Rule, ship: Ship) -> tuple[bool, list[str]]:
         else:
             test(ship.keel_laid >= d, f"keel laid {ship.keel_laid} (on or after {d})",
                  f"only for ships with keel laid on or after {d} (this: {ship.keel_laid})")
+    if a.get("complete_arrangement"):
+        test(ship.complete_arrangement, "the design covers the whole ship",
+             "the design is a partial model; 'is it on board?' checks need the complete arrangement")
+    if "persons_at_least" in a:
+        n = a["persons_at_least"]
+        test(ship.persons_total >= n, f"{ship.persons_total} persons on board (≥ {n})",
+             f"only for ships with {n} or more persons on board (this: {ship.persons_total})")
     if "length_m_at_least" in a:
         n = a["length_m_at_least"]
         test(ship.length_m >= n, f"length {ship.length_m} m (≥ {n} m)", f"only for ships of {n} m or more")
@@ -132,7 +139,7 @@ class _Ctx:
     def find(self, role: str) -> Element:
         el = next((e for e in self.design.elements if e.props.get("role") == role), None)
         if el is None:
-            raise LookupError(f"the design has no element with role '{role}'")
+            raise LookupError(f"the design doesn't include the {role.replace('_', ' ')} (not shown on this drawing or model)")
         return el
 
     def call(self, name: str, args: list):
@@ -146,6 +153,21 @@ class _Ctx:
             if prop not in el.props:
                 raise LookupError(f"{el.id} has no '{prop}'")
             return _to_unit(el.props[prop], unit)
+        if name == "count":         # count(type) -> number of elements of that type
+            return sum(1 for e in self.design.elements if e.type == args[0])
+        if name == "sum_prop":      # sum_prop(type, prop) -> sum of a numeric property
+            return sum(int(e.props.get(args[1], 0)) for e in self.design.elements if e.type == args[0])
+        if name == "count_on_deck":  # count_on_deck(type, prop, value) on this element's deck
+            t, prop, val = args
+            return sum(1 for e in self.design.elements
+                       if e.type == t and e.deck == self.element.deck and e.props.get(prop) == val)
+        if name == "prop":          # prop(name) of the element being checked
+            if args[0] not in self.element.props:
+                raise LookupError(f"{self.element.id} has no '{args[0]}'")
+            return self.element.props[args[0]]
+        if name == "gt_band":       # gt_band(gt, limit1, limit2, v1, v2, v3); unknown GT -> strictest (v3)
+            gt, l1, l2, v1, v2, v3 = args
+            return v3 if gt <= 0 else (v1 if gt < l1 else (v2 if gt < l2 else v3))
         if name == "geom":          # geom(role, key) -> metres
             role, key = args
             v = self.find(role).geom(key)
@@ -244,6 +266,10 @@ def check_rule(rule: Rule, design: Design) -> list[dict]:
                 ok = _slope(actual) <= _slope(c["slope_max"]) + 1e-12
                 required = f"not steeper than {c['slope_max']}"
                 msg = f"slope {actual} is {'within' if ok else 'steeper than'} the allowed {c['slope_max']}"
+            elif "equals_expr" in c:
+                want = ctx.fill(c["equals_expr"])
+                ok = str(actual).strip() == want.strip()
+                required, msg = want, f"the drawing gives {actual}, it states {want}"
             elif "equals" in c:
                 ok = str(actual).lower() == str(c["equals"]).lower()
                 required, msg = str(c["equals"]), f"design says '{actual}', required '{c['equals']}'"

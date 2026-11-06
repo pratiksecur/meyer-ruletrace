@@ -25,6 +25,14 @@ def evaluate(paths: list[Path]) -> dict:
     rows = []
     for p in paths:
         d = load_design(p)
+        side = p.with_name(p.stem + ".expected.json")
+        if side.exists():  # labels for drawings/models that can't carry them inline
+            import json
+            from datetime import date
+            spec = json.loads(side.read_text(encoding="utf-8"))
+            for k, v in spec.get("ship_overrides", {}).items():
+                setattr(d.ship, k, date.fromisoformat(v) if k == "keel_laid" else v)
+            d.expected = spec["expected"]
         got = {(f["rule_id"], f["element_id"], f["status"]) for f in check_design(d, rules)["findings"]
                if f["status"] != "pass"}
         exp = {(x["rule_id"], x.get("element_id"), x["status"]) for x in d.expected}
@@ -40,7 +48,10 @@ def evaluate(paths: list[Path]) -> dict:
 
 
 if __name__ == "__main__":
-    paths = [Path(a) for a in sys.argv[1:]] or sorted((ROOT / "ruletrace" / "samples").glob("*.json"))
+    samples = ROOT / "ruletrace" / "samples"
+    paths = [Path(a) for a in sys.argv[1:]] or sorted(
+        [p for p in samples.glob("*.json") if not p.name.endswith(".expected.json")]
+        + [p for p in samples.glob("*.pdf") if p.with_name(p.stem + ".expected.json").exists()])
     r = evaluate(paths)
     for row in r["designs"]:
         print(f"{row['design']:40} expected {row['expected']:2}  correct {row['correct']:2}"

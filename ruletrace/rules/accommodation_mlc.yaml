@@ -1,0 +1,89 @@
+# Crew accommodation (ILO Maritime Labour Convention, 2006, Title 3) and drawing consistency.
+# Title 3 construction requirements apply to ships constructed on or after 20 August 2013.
+# These checks read directly from a general-arrangement drawing (cabin labels with floor areas).
+
+- id: MLC-A3.1-9-SINGLE-CABIN-AREA
+  title: Single-berth sleeping room floor area
+  regime: MLC 2006
+  ref: "MLC 2006 Standard A3.1, para 9"
+  quote: "7 square metres in ships of 10,000 gross tonnage or over"
+  source_url: https://assets.publishing.service.gov.uk/media/5a7ef85ced915d74e6227a0e/Draft_crew_accommodation_transitional_requirements.pdf
+  verified: true
+  applies_if: {keel_laid_on_or_after: 2013-08-20}
+  target: {type: cabin, when: {berths: 1}}
+  check: {property: floor_area, requirement_expr: "at least {gt_band(ship.gross_tonnage, 3000, 10000, 4.5, 5.5, 7)} m2"}
+  severity: major
+  why: >-
+    Minimum single cabin size is 4.5 m² (<3,000 GT), 5.5 m² (3,000–10,000 GT) or 7 m² (≥10,000 GT).
+    If gross tonnage is not given the strictest value (7 m²) is used, so a pass holds for any size of ship.
+  fix: Enlarge the cabin to the minimum floor area for the ship's gross tonnage.
+
+- id: MLC-A3.1-9-DOUBLE-CABIN-AREA-SPS
+  title: Two-person sleeping room floor area (passenger and special purpose ships)
+  regime: MLC 2006
+  ref: "MLC 2006 Standard A3.1, para 9 (passenger and special purpose ships)"
+  quote: "On passenger ships and special purpose ships the floor area of sleeping rooms for seafarers not performing the duties of ships' officers shall not be less than … 7.5 square metres in rooms accommodating two persons"
+  source_url: https://assets.publishing.service.gov.uk/media/5a7ef85ced915d74e6227a0e/Draft_crew_accommodation_transitional_requirements.pdf
+  verified: true
+  applies_if: {ship_types: [passenger, special_purpose, ro_ro_passenger], keel_laid_on_or_after: 2013-08-20}
+  target: {type: cabin, when: {berths: 2}}
+  check: {property: floor_area, requirement: "at least 7.5 m2"}
+  severity: major
+  why: Two-person cabins for ratings on passenger and special purpose ships must give at least 7.5 m².
+  fix: Enlarge the cabin to at least 7.5 m², or make it a single-berth cabin.
+
+- id: MLC-A3.1-12-HOSPITAL
+  title: Separate hospital accommodation
+  regime: MLC 2006
+  ref: "MLC 2006 Standard A3.1, para 12"
+  quote: "ships carrying 15 or more seafarers and engaged in a voyage of more than three days' duration must provide separate hospital accommodation"
+  source_url: https://www.register-iri.com/forms/upload/MN-7-044-1.pdf
+  verified: true
+  applies_if: {persons_at_least: 15, keel_laid_on_or_after: 2013-08-20, complete_arrangement: true}
+  target: {type: ship}
+  check: {actual_expr: "{count('hospital')}", requirement: "at least 1"}
+  severity: major
+  why: >-
+    With 15 or more people on board on voyages over three days, a hospital room used only for medical
+    purposes is required. Assumes voyages of more than three days (check the trading pattern).
+  fix: Provide a separate hospital (sickbay) room.
+
+- id: GA-CONSISTENCY-TOTAL-BERTHS
+  title: Berths on the plans match the stated accommodation
+  regime: Drawing consistency
+  ref: "Drawing title block: accommodation"
+  quote: ""
+  source_url: ""
+  verified: true
+  applies_if: {persons_at_least: 1, complete_arrangement: true}
+  target: {type: ship}
+  check: {actual_expr: "{sum_prop('cabin', 'berths')}", equals_expr: "{ship.persons_total}"}
+  severity: major
+  why: If the plans and the stated capacity disagree, life-saving, escape and accommodation calculations may use the wrong number.
+  fix: Correct either the stated accommodation or the cabin layout so they agree.
+
+- id: GA-CONSISTENCY-DECK-SINGLES
+  title: Single cabins per deck match the drawing's statement
+  regime: Drawing consistency
+  ref: "Drawing title block: cabins per deck"
+  quote: ""
+  source_url: ""
+  verified: true
+  target: {type: declaration}
+  check: {actual_expr: "{count_on_deck('cabin', 'berths', 1)}", equals_expr: "{prop('declared_single')}"}
+  severity: minor
+  why: The cabin list in the title block should describe the plan exactly.
+  fix: Update the title block or the deck plan so the single-cabin count agrees.
+
+- id: GA-CONSISTENCY-DECK-DOUBLES
+  title: Double cabins per deck match the drawing's statement
+  regime: Drawing consistency
+  ref: "Drawing title block: cabins per deck"
+  quote: ""
+  source_url: ""
+  verified: true
+  target: {type: declaration}
+  check: {actual_expr: "{count_on_deck('cabin', 'berths', 2)}", equals_expr: "{prop('declared_double')}"}
+  severity: minor
+  why: The cabin list in the title block should describe the plan exactly.
+  fix: Update the title block or the deck plan so the double-cabin count agrees.

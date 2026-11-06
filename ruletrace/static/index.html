@@ -12,7 +12,7 @@ header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var
 header h1{font-size:17px;margin:0;font-weight:600}header .sub{color:#b9c7d8;font-size:12px}header .sp{flex:1}
 header a{color:#cfe3ff;font-size:13px}header select{font:inherit;border-radius:6px;border:0;padding:4px 6px}
 .wrap{flex:1;display:grid;grid-template-columns:300px 1fr 380px;min-height:0}
-@media(max-width:1100px){.wrap{grid-template-columns:1fr;}#view{height:60vh}}
+@media(max-width:1100px){html,body{height:auto}body{display:block}.wrap{display:block}#view{height:60vh}aside{border:0!important}}
 aside{background:var(--card);border-right:1px solid var(--line);overflow:auto;padding:14px}
 #side2{border-right:0;border-left:1px solid var(--line)}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 8px;font-weight:600}
@@ -21,7 +21,9 @@ button,select,input{font:inherit}button{border:1px solid var(--line);background:
 button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button:disabled{opacity:.5}
 .list .it{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list .it:hover{background:var(--bg)}
 .list .it.sel{border-color:var(--teal);background:#e8f4f4}.small{font-size:12px}.muted{color:var(--muted)}
-#view{position:relative;min-height:0;background:#e9eef2}#view canvas{display:block}
+#view{position:relative;min-height:0;min-width:0;overflow:hidden;background:#e9eef2}
+#view canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}
+@media(min-width:1101px){html,body{overflow:hidden}}aside{min-height:0}
 #legend{position:absolute;left:10px;bottom:10px;background:#ffffffe6;border-radius:8px;padding:6px 10px;font-size:12px;display:flex;gap:10px}
 #hover{position:absolute;pointer-events:none;background:#16202aee;color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;display:none}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
@@ -56,11 +58,12 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
     <div id="designs" class="list small"></div>
     <details><summary>Load a sample</summary><div id="samples" class="list small"></div></details>
     <h2>Upload a model</h2>
-    <input type="file" id="file" accept=".json,.ifc" aria-label="Design file (.json or .ifc)" style="width:100%">
-    <div class="small muted" style="margin:4px 0 6px">IFC 3D model or RuleTrace JSON design</div>
+    <input type="file" id="file" accept=".ifc,.pdf,.json" aria-label="Design file (.ifc, .pdf or .json)" style="width:100%">
+    <div class="small muted" style="margin:4px 0 6px">IFC 3D model, GA drawing (vector PDF) or RuleTrace JSON</div>
     <button id="up" class="primary" style="width:100%">Upload and check</button>
     <h2>Ship profile</h2>
     <div id="ship" class="small muted">Select a design</div>
+    <div id="interp" class="small" style="display:none"></div>
     <h2>Where will it operate?</h2>
     <div class="areas small" id="areas"></div>
     <label class="small" for="keel">Keel laid</label>
@@ -115,25 +118,36 @@ const guard = fn => async (...a) => { try { await fn(...a) } catch(e){ toast(e.m
 
 // ---------- 3D scene ----------
 const view = $("#view");
-const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 view.prepend(renderer.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9eef2);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 4000);
 const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(200, 300, 150); scene.add(sun);
 let group = new THREE.Group(); scene.add(group);
 const meshes = new Map();
-function resize(){ const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / Math.max(h,1); camera.updateProjectionMatrix(); }
-new ResizeObserver(resize).observe(view); resize();
-(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+let lastW = 0, lastH = 0;
+function resize(){
+  const w = Math.floor(view.clientWidth), h = Math.floor(view.clientHeight);
+  if (w < 2 || h < 2 || (w === lastW && h === lastH)) return;
+  lastW = w; lastH = h;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(() => requestAnimationFrame(resize)).observe(view); resize();
+let dirty = true;
+controls.addEventListener("change", () => dirty = true);
+(function loop(){ requestAnimationFrame(loop); if (controls.update() || dirty) { renderer.render(scene, camera); dirty = false; } })();
+new ResizeObserver(() => dirty = true).observe(view);
 
 // ship frame (x fwd, y stbd, z up) -> three (x, z, y)
 function placeBox(b, color, opts={}){
   const [x,y,z,lx,wy,hz] = b;
   const g = new THREE.BoxGeometry(Math.max(lx,0.05), Math.max(hz,0.05), Math.max(wy,0.05));
-  const m = new THREE.MeshStandardMaterial({color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthWrite: !opts.opacity});
+  const m = new THREE.MeshStandardMaterial({color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthWrite: !opts.opacity,
+    polygonOffset: true, polygonOffsetFactor: opts.opacity ? 2 : 0, polygonOffsetUnits: opts.opacity ? 2 : 0});
   const mesh = new THREE.Mesh(g, m); mesh.position.set(x + lx/2, z + hz/2, y + wy/2);
   if (opts.edges) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color, transparent:true, opacity:.9})); mesh.add(e); }
   group.add(mesh); return mesh;
@@ -147,10 +161,9 @@ function statusOf(id){
 function buildScene(){
   scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear();
   const ship = result.ship, L = ship.length_m || 100, B = ship.breadth_m || 20;
-  const hull = placeBox([0, -B/2, 0, L, B, 0.01], 0x9aa8b6, {opacity:.25});
   const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(L, 1, B)), new THREE.LineBasicMaterial({color:0x7a8896}));
   outline.position.set(L/2, 0, 0); group.add(outline);
-  const grid = new THREE.GridHelper(Math.max(L, B) * 1.2, 24, 0xb4bfca, 0xd3dae0); grid.position.set(L/2, -0.01, 0); group.add(grid);
+  const grid = new THREE.GridHelper(Math.max(L, B) * 1.2, 24, 0xb4bfca, 0xd3dae0); grid.position.set(L/2, -0.6, 0); group.add(grid);
   for (const el of result.elements) {
     if (!el.box) continue;
     const st = statusOf(el.id), zone = el.type === "fire_zone";
@@ -162,7 +175,9 @@ function buildScene(){
       const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, z), new THREE.MeshStandardMaterial({color:0x8a96a3}));
       mast.position.set(x + lx/2, z/2, y + wy/2); group.add(mast);
     } else {
-      mesh = placeBox(el.box, COLORS[st], zone ? {opacity: st === "none" || st === "pass" ? .08 : .22, edges:true} : {edges: st === "fail"});
+      const b = zone ? [el.box[0] + .15, el.box[1] + .15, el.box[2] + .15, el.box[3] - .3, el.box[4] - .3, el.box[5] - .3] : el.box;
+      mesh = placeBox(b, COLORS[st], zone ? {opacity: st === "none" || st === "pass" ? .08 : .22, edges:true} : {edges: st === "fail"});
+      if (zone) mesh.renderOrder = 2;
     }
     mesh.userData = {id: el.id, el}; meshes.set(el.id, mesh);
   }
@@ -173,13 +188,13 @@ function frame(id){
   if (id && meshes.get(id)) box.setFromObject(meshes.get(id)); else box.setFromObject(group);
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length() || 10;
   const d = id ? Math.max(s * 3, 25) : s * 0.9;
-  camera.position.set(c.x - d * .55, c.y + d * .55, c.z + d * .75); controls.target.copy(c); controls.update();
+  camera.position.set(c.x - d * .55, c.y + d * .55, c.z + d * .75); controls.target.copy(c); controls.update(); dirty = true;
 }
 function highlight(ids){
   for (const [id, m] of meshes) {
     const on = ids.includes(id);
     m.scale.setScalar(on ? 1.04 : 1);
-    m.material.emissive = new THREE.Color(on ? 0x331111 : 0x000000);
+    m.material.emissive = new THREE.Color(on ? 0x331111 : 0x000000); dirty = true;
     if (m.userData.el.type !== "fire_zone" && m.material) m.material.opacity = 1;
   }
 }
@@ -225,7 +240,21 @@ async function open(id, overrides){
   result = await api(`/ruletrace/designs/${id}/check`, {method:"POST", body:{ship_overrides: overrides || {}}});
   const s = result.ship;
   $("#ship").className = "small";
-  $("#ship").innerHTML = `<b>${esc(s.name)}</b><br>${esc(s.ship_type)} · ${s.passengers} passengers · ${s.length_m} × ${s.breadth_m} m · ${Number(s.gross_tonnage).toLocaleString()} GT · flag ${esc(s.flag || "–")}`;
+  $("#ship").innerHTML = `<b>${esc(s.name)}</b><br>${esc(s.ship_type.replace("_"," "))} · ${s.passengers} passengers · ${s.persons_total || "?"} persons · ${s.length_m} × ${s.breadth_m} m · ${s.gross_tonnage ? Number(s.gross_tonnage).toLocaleString() + " GT" : "GT not given"} · flag ${esc(s.flag || "–")}`
+    + (s.keel_laid ? "" : `<div style="margin-top:4px;color:var(--warn)">Keel-laying date not given: date-based rules can't be applied. Set it below and re-check.</div>`);
+  const it = result.interpretation || {};
+  $("#interp").style.display = Object.keys(it).length ? "" : "none";
+  if (Object.keys(it).length) {
+    const pp = it.principal_particulars || {}, fnd = it.found || {};
+    $("#interp").innerHTML = `<details open><summary><b>How the drawing was read</b></summary>
+      <div class="muted">${esc(it.source)} · page ${it.page}</div>
+      <div>Scale: ${esc(it.scale)}</div><div>Frame spacing ${it.frame_spacing_m} m</div>
+      <div>Particulars: LOA ${pp.loa_m ?? "–"} m · LBP ${pp.lbp_m ?? "–"} m · B ${pp.breadth_m ?? "–"} m · ${pp.accommodation_persons || "?"} persons</div>
+      ${pp.class ? `<div class="muted">${esc(pp.class)}</div>` : ""}
+      <div style="margin-top:4px">Decks: ${(it.decks||[]).map(d => `${esc(d.deck)} (${d.height_m ?? "?"} m${d.centreline === "estimated" ? ", centreline estimated" : ""})`).join(", ")}</div>
+      <div>Found: ${fnd.cabin||0} cabins · ${fnd.hospital||0} hospital · ${fnd.space||0} other spaces</div>
+      ${(it.notes||[]).map(n => `<div style="color:var(--warn);margin-top:4px">${esc(n)}</div>`).join("")}</details>`;
+  }
   document.querySelectorAll("#areas input").forEach(i => i.checked = (s.operating_areas || []).includes(i.value));
   $("#keel").value = s.keel_laid || "";
   buildScene(); renderFindings();

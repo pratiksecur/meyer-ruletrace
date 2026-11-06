@@ -95,14 +95,16 @@ def make_router(app) -> APIRouter:
             out.append({"name": p.stem, "title": d.get("title", p.stem)})
         if (SAMPLES / "demo_deck_section.ifc").exists():
             out.append({"name": "demo_deck_section", "title": "IFC 3D model: deck section (synthetic)", "ifc": True})
+        if (SAMPLES / "demo_ga_drawing.pdf").exists():
+            out.append({"name": "demo_ga_drawing", "title": "GA drawing (PDF): research vessel with planted issues (synthetic)"})
         return out
 
     @router.post("/designs/sample/{name}")
     def load_sample(name: str, who: Principal = Depends(engineer)) -> dict:
         if not re.fullmatch(r"[a-z0-9_]+", name):
             raise HTTPException(400, "bad sample name")
-        p = SAMPLES / f"{name}.json"
-        p = p if p.exists() else SAMPLES / f"{name}.ifc"
+        p = next((SAMPLES / f"{name}{ext}" for ext in (".json", ".ifc", ".pdf") if (SAMPLES / f"{name}{ext}").exists()),
+                 SAMPLES / f"{name}.json")
         if not p.exists():
             raise HTTPException(404, "no such sample")
         return _save(load_design(p), p.read_bytes(), p.name, who)
@@ -125,13 +127,21 @@ def make_router(app) -> APIRouter:
                     tmp.write_bytes(data)
                     design = design_from_ifc(tmp, ship=ship)
                 design.source_file = name
+            elif name.lower().endswith(".pdf"):
+                from .ga_import import design_from_ga_pdf
+                with tempfile.TemporaryDirectory() as td:
+                    tmp = Path(td) / "drawing.pdf"
+                    tmp.write_bytes(data)
+                    design = design_from_ga_pdf(tmp, ship=ship)
+                design.source_file = name
+                design.interpretation["source"] = name
             elif name.lower().endswith(".json"):
                 raw = json.loads(data.decode("utf-8"))
                 if ship:
                     raw["ship"] = ship
                 design = design_from_dict(raw, source_file=name)
             else:
-                raise DesignError("upload a .json design or an .ifc 3D model")
+                raise DesignError("upload an .ifc 3D model, a .pdf general-arrangement drawing or a .json design")
         except json.JSONDecodeError as exc:
             raise HTTPException(400, f"invalid JSON: {exc}") from exc
         except DesignError as exc:
@@ -175,6 +185,7 @@ def make_router(app) -> APIRouter:
         except (DesignError, RuleError) as exc:
             raise HTTPException(400, str(exc)) from exc
         result.update(design_id=design_id, filename=rec["filename"], design_sha256=rec["sha256"],
+                      interpretation=design.interpretation, source_format=design.source_format,
                       rules_sha256=_rules_sha(rs), what_if=overrides)
         with app.state.session_factory() as s:
             entry = audit.append(s, action="design.checked", actor=who.name, actor_kind=who.kind, payload={

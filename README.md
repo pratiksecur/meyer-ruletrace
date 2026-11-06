@@ -14,7 +14,7 @@ text, what was required, what the design has, and how to fix it.
 | Meyer's criterion | How RuleTrace answers it |
 | --- | --- |
 | **Accuracy**: compliant vs non-compliant, few misleading findings | Rules are explicit, tested checks; every comparison (numbers with units, slopes, fire classes) is done in code. A value the design doesn't give is reported as **"can't check"**, never guessed. Labelled sample designs measure precision and recall (`scripts/evaluate.py`). |
-| **Design interpretation**: documents, drawings, 3D models; show *why* | Reads **IFC** models (geometry plus property sets) and a simple JSON design format. Fire-zone lengths are measured from the 3D shape. Failing parts turn red in the 3D viewer; each finding shows required vs actual and the source text. |
+| **Design interpretation**: documents, drawings, 3D models; show *why* | Reads **general-arrangement drawings (vector PDF)**, **IFC 3D models** and a simple JSON format. From a GA it measures the scale from the frame numbers (cross-checked with the title block), finds each deck plan and its height, and reads every room label ("2 PERS. 15 m2", "SICKBAY 20 m2") into a positioned room. Failing parts turn red in the 3D viewer; each finding shows required vs actual and the source text. |
 | **Quality and usability**: a solid foundation for an engineering tool | Engineer-first workflow (upload, see issues on the model, fix, re-check), "what-if" ship-profile changes, a tamper-evident audit record of every check, role-based access, tests. |
 
 Also built in:
@@ -25,9 +25,9 @@ Also built in:
 ## Architecture
 
 ```
- IFC 3D model ─┐
- JSON design  ─┼─▶ importers ─▶ design model (ship profile + elements with 3D boxes and properties)
- (drawings: next)┘                              │
+ GA drawing (PDF) ─┐
+ IFC 3D model     ─┼─▶ importers ─▶ design model (ship profile + elements with 3D boxes and properties)
+ JSON design      ─┘                              │
                                                 ▼
  rule pack (YAML, each rule: source, quote, ─▶ rule engine ─▶ findings (pass / fail / warn / can't check)
    applicability, check, fix)                   │                         │
@@ -36,9 +36,10 @@ Also built in:
 ```
 
 - `ruletrace/model.py`: design model and JSON loader
+- `ruletrace/ga_import.py`: GA drawing reader (PDFium): scale from frame numbers, deck plans and heights, room labels, principal particulars, title-block statements
 - `ruletrace/ifc_import.py`: IFC reader (ifcopenshell): class mapping, property sets, world-space bounding boxes
 - `ruletrace/engine.py`: applicability, safe expressions, checks, findings
-- `ruletrace/rules/*.yaml`: the rule pack (17 rules: SOLAS/FSS fire and escape, COLREG lights, PVAG/ADA, MARPOL VI Tier III)
+- `ruletrace/rules/*.yaml`: the rule pack (23 rules: SOLAS/FSS fire and escape, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
 - Built on **Vartija core** (prior work, tag `pre-event-2026-11-05`): login and roles, audit hash chain, document sources, dashboard
@@ -56,7 +57,7 @@ git clone https://github.com/pratiksecur/meyer-ruletrace.git
 cd meyer-ruletrace
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1    macOS/Linux: source .venv/bin/activate
-python -m pip install -e ../Vartija/vartija-core -e ".[ifc,dev]"
+python -m pip install -e ../Vartija/vartija-core -e ".[ifc,drawings,dev]"
 python -m pytest -q                       # all tests should pass
 python -m uvicorn ruletrace.app:app --port 8001
 ```
@@ -88,6 +89,25 @@ Put it behind the company reverse proxy (TLS). Everything runs on-premises. No d
 leaves the network, and no external AI service is needed for checking.
 
 ## Design input format
+
+### General-arrangement drawing (vector PDF)
+Upload the PDF in the viewer. The reader reports how it read the drawing ("How the drawing was read"):
+- **Scale** from the rows of frame numbers along each deck plan (straight-line fit) and the stated frame
+  spacing, cross-checked against the title-block scale (e.g. "measured 1:150, title block says 1:150 (agrees)").
+- **Deck plans** from the deck titles; **deck heights** from the profile legend (e.g. "11300" → 11.3 m ABL).
+- **Rooms** from labels: `2 PERS. 15 m2` → two-berth cabin, `SICKBAY 20 m2` → hospital, `GALLEY 30 m2` → space.
+  Positions come from the label position; footprints are squares of the stated area (approximate).
+- **Principal particulars** and **title-block statements** ("ACCOMMODATION FOR 38 PERSONS", "SHELTER DECK:
+  6 SINGLE AND 10 DOUBLE CABINS"), so the plan is checked against what the drawing itself claims.
+- The keel-laying date and gross tonnage are usually not on a GA. Set the keel date in the viewer to apply
+  date-based rules. With unknown gross tonnage, the strictest MLC size band is used, so a pass holds for any size.
+- Scanned (image-only) PDFs have no text layer and are rejected with a clear message (OCR them first).
+- "Does it exist on board?" checks (e.g. the hospital) only run on complete arrangements, never on partial models.
+
+Tested on the public DANA V general arrangement linked in Meyer Turku's brief (28 cabins, sickbay and
+44 other spaces read in under a second; plans agree with the title block). That drawing carries a
+confidentiality notice from its owners, so it is **not** included in this repository. A synthetic GA with
+planted problems is: `ruletrace/samples/demo_ga_drawing.pdf` (`scripts/make_ga_sample.py`).
 
 ### IFC (recommended for 3D models)
 - Element classes are mapped automatically: `IfcDoor`→door, `IfcStair`→stair, `IfcWall`→bulkhead, `IfcRamp`→ramp, `IfcEngine`→diesel_engine, `IfcSpace` named "corridor" / "fire zone".
@@ -144,10 +164,11 @@ engine does what the rules say. It is not proof that the rules are complete. Rul
 
 - Rule texts are summaries and quotes from public sources. Class rules (e.g. DNV) and full IMO texts must be checked against the official editions before real use.
 - The rule pack is a focused starter set, not full coverage. Each rule is small to add and test.
-- General-arrangement PDF drawings are not read yet. Next: extract room labels and dimensions from vector PDFs, with an engineer confirming the result.
+- GA reading uses text labels and their positions. Room outlines (the drawn lines) are not traced yet, so footprints are approximate, and dimension lines are not yet used. Vector PDFs only.
 - PVAG were published by the US Access Board as proposed guidelines. Confirm their status for each project.
 
 ## Data and IP
 
 No Meyer Turku design data was used. All sample designs are synthetic. three.js is MIT licensed
-(`ruletrace/static/three.LICENSE`); ifcopenshell is LGPL (installed separately, not bundled).
+(`ruletrace/static/three.LICENSE`); ifcopenshell is LGPL and pypdfium2 is Apache-2.0/BSD (both installed separately, not bundled).
+Third-party drawings (e.g. from the brief's links) must not be committed: they carry their owners' notices.

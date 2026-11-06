@@ -13,7 +13,7 @@ def _issues(result):
     return {(f["rule_id"], f["element_id"], f["status"]) for f in result["findings"] if f["status"] != "pass"}
 
 
-@pytest.mark.parametrize("name", [p.name for p in SAMPLES.glob("*.json")])
+@pytest.mark.parametrize("name", [p.name for p in SAMPLES.glob("*.json") if not p.name.endswith(".expected.json")])
 def test_every_labelled_sample_is_exact(name):
     d = load_design(SAMPLES / name)
     assert _issues(check_design(d)) == {(x["rule_id"], x.get("element_id"), x["status"]) for x in d.expected}
@@ -21,7 +21,8 @@ def test_every_labelled_sample_is_exact(name):
 
 def test_rules_all_have_sources():
     for r in load_rules():
-        assert r.ref and r.source_url.startswith("https://"), r.id
+        if r.regime != "Drawing consistency":   # internal checks of a drawing against itself
+            assert r.ref and r.source_url.startswith("https://"), r.id
         assert r.fix and r.why, r.id
 
 
@@ -68,3 +69,8 @@ def test_ifc_import_reads_geometry_and_psets():
     assert ("SOLAS-II-2-9.2.2.1-MVZ-MAX", "FZ3", "fail") in issues          # 51 m measured from 3D shape
     assert ("SOLAS-II-2-9.2.2.1.1-MVZ-A60", "BH-195", "fail") in issues     # Pset_WallCommon.FireRating
     assert ("PVAG-V404.2.3-DOOR-WIDTH", "D-7330", "unknown") in issues      # overall width is not clear width
+
+
+def test_partial_models_never_get_presence_findings():
+    d = load_design(SAMPLES / "demo_cruise_deck7.json")
+    assert not any(f["rule_id"] in {"MLC-A3.1-12-HOSPITAL", "GA-CONSISTENCY-TOTAL-BERTHS"} for f in check_design(d)["findings"])
