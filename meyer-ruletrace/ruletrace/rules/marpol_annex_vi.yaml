@@ -1,0 +1,44 @@
+# MARPOL Annex VI regulation 13: NOx Tier III engines inside NOx Emission Control Areas.
+# Area-dependent ("where will the ship operate"): set the ship's operating_areas.
+
+- id: MARPOL-VI-13-TIER-III-NA
+  title: Tier III engines for North American / US Caribbean ECA
+  regime: MARPOL
+  ref: "MARPOL Annex VI reg. 13.5.1 (MEPC.251(66))"
+  quote: "Engines installed on ships constructed (keel laid) on or after 1 January, 2016, operating in these ECAs, must comply with the Tier III requirements."
+  source_url: https://www.lr.org/en/class-news-resources/20-15/
+  verified: true
+  applies_if: {keel_laid_on_or_after: 2016-01-01, operating_areas_any: [north_american_eca, us_caribbean_eca]}
+  target: {type: diesel_engine}
+  check: {property: nox_tier, equals: "III"}
+  severity: major
+  why: The ship will operate in a NOx Emission Control Area where Tier III limits apply.
+  fix: Specify Tier III (or Tier II/III switchable) engines, e.g. with SCR or EGR, or a compliant gas mode.
+
+- id: MARPOL-VI-13-TIER-III-BALTIC-NORTH-SEA
+  title: Tier III engines for Baltic Sea / North Sea ECA
+  regime: MARPOL
+  ref: "MARPOL Annex VI reg. 13.5.1 (MEPC.286(71))"
+  quote: "enforced for ships constructed (keel laying) on or after 1 January 2021"
+  source_url: https://www.lr.org/en/knowledge/class-news/02-18/
+  verified: true
+  applies_if: {keel_laid_on_or_after: 2021-01-01, operating_areas_any: [baltic_sea, north_sea]}
+  target: {type: diesel_engine}
+  check: {property: nox_tier, equals: "III"}
+  severity: major
+  why: The Baltic and North Sea became NOx ECAs for ships with keel laid from 2021.
+  fix: Specify Tier III (or Tier II/III switchable) engines.
+
+- id: MARPOL-VI-13-TIER-III-CANADIAN-ARCTIC
+  title: Tier III engines for the Canadian Arctic ECA
+  regime: MARPOL
+  ref: "MARPOL Annex VI (MEPC.392(82)), in force 1 March 2026"
+  quote: "targeting ships with keel laying dates from January 1, 2025"
+  source_url: https://rs-class.org/en/news/general/marpol-amendments-entering-into-force-new-ecas-for-the-norwegian-sea-and-canadian-arctic-/
+  verified: true
+  applies_if: {keel_laid_on_or_after: 2025-01-01, operating_areas_any: [canadian_arctic]}
+  target: {type: diesel_engine}
+  check: {property: nox_tier, equals: "III"}
+  severity: major
+  why: The Canadian Arctic ECA applies Tier III to ships with keel laid from 1 January 2025.
+  fix: Specify Tier III (or Tier II/III switchable) engines.

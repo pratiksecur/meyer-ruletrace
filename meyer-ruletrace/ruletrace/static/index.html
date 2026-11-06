@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuleTrace · design check</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#16202a;--muted:#5d6975;--line:#dde3e8;--navy:#0b2545;--teal:#138a8a;
+--fail:#d64545;--warn:#d88b16;--unknown:#6b7c93;--pass:#2e8b57;--r:10px}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--navy);color:#fff}
+header h1{font-size:17px;margin:0;font-weight:600}header .sub{color:#b9c7d8;font-size:12px}header .sp{flex:1}
+header a{color:#cfe3ff;font-size:13px}header select{font:inherit;border-radius:6px;border:0;padding:4px 6px}
+.wrap{flex:1;display:grid;grid-template-columns:300px 1fr 380px;min-height:0}
+@media(max-width:1100px){.wrap{grid-template-columns:1fr;}#view{height:60vh}}
+aside{background:var(--card);border-right:1px solid var(--line);overflow:auto;padding:14px}
+#side2{border-right:0;border-left:1px solid var(--line)}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 8px;font-weight:600}
+h2:first-child{margin-top:0}
+button,select,input{font:inherit}button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;cursor:pointer}
+button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button:disabled{opacity:.5}
+.list .it{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list .it:hover{background:var(--bg)}
+.list .it.sel{border-color:var(--teal);background:#e8f4f4}.small{font-size:12px}.muted{color:var(--muted)}
+#view{position:relative;min-height:0;background:#e9eef2}#view canvas{display:block}
+#legend{position:absolute;left:10px;bottom:10px;background:#ffffffe6;border-radius:8px;padding:6px 10px;font-size:12px;display:flex;gap:10px}
+#hover{position:absolute;pointer-events:none;background:#16202aee;color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;display:none}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.counts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.counts div{background:var(--bg);border-radius:8px;padding:6px;text-align:center}.counts b{display:block;font-size:20px}
+.f{border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:8px;cursor:pointer;background:#fff}
+.f:hover{border-color:#b8c4ce}.f.sel{border-color:var(--ink);box-shadow:0 0 0 2px #16202a22}
+.f .h{display:flex;gap:8px;align-items:baseline}.f .t{font-weight:600;flex:1}
+.pill{font-size:11px;border-radius:999px;padding:1px 7px;color:#fff;white-space:nowrap}
+.pill.fail{background:var(--fail)}.pill.warn{background:var(--warn)}.pill.unknown{background:var(--unknown)}.pill.pass{background:var(--pass)}
+.req{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:6px 0;font-size:13px}.req span{color:var(--muted)}
+.quote{border-left:3px solid var(--line);padding:4px 8px;margin:6px 0;color:#384552;font-style:italic;font-size:12.5px}
+.badge{font-size:11px;border:1px solid var(--line);border-radius:6px;padding:0 5px;color:var(--muted)}
+.badge.unv{border-color:var(--warn);color:var(--warn)}
+details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
+.areas label{display:block;font-size:13px}.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
+.toast.err{background:var(--fail)}
+.filters{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}.filters button{padding:3px 8px;font-size:12px}.filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+</style>
+</head>
+<body>
+<header>
+  <h1>RuleTrace</h1><span class="sub">Check ship designs against SOLAS, MARPOL, COLREG, PVAG and ADA, and see why something fails</span>
+  <span class="sp"></span>
+  <label class="small" for="who">Signed in as</label>
+  <select id="who"></select>
+  <a href="/dashboard">Dashboard</a>
+</header>
+<div class="wrap">
+  <aside>
+    <h2>Design</h2>
+    <div id="designs" class="list small"></div>
+    <details><summary>Load a sample</summary><div id="samples" class="list small"></div></details>
+    <h2>Upload a model</h2>
+    <input type="file" id="file" accept=".json,.ifc" aria-label="Design file (.json or .ifc)" style="width:100%">
+    <div class="small muted" style="margin:4px 0 6px">IFC 3D model or RuleTrace JSON design</div>
+    <button id="up" class="primary" style="width:100%">Upload and check</button>
+    <h2>Ship profile</h2>
+    <div id="ship" class="small muted">Select a design</div>
+    <h2>Where will it operate?</h2>
+    <div class="areas small" id="areas"></div>
+    <label class="small" for="keel">Keel laid</label>
+    <input type="date" id="keel" style="width:100%;margin:2px 0 8px">
+    <button id="recheck" style="width:100%">Re-check with these settings</button>
+  </aside>
+  <main id="view"><div id="hover"></div>
+    <div id="legend"><span><span class="dot" style="background:var(--fail)"></span>fails</span><span><span class="dot" style="background:var(--warn)"></span>warning</span>
+      <span><span class="dot" style="background:var(--unknown)"></span>can't check</span><span><span class="dot" style="background:var(--pass)"></span>passes</span>
+      <span><span class="dot" style="background:#c4ccd4"></span>not checked</span></div></main>
+  <aside id="side2">
+    <h2>Findings</h2>
+    <div id="counts" class="counts"></div>
+    <div class="filters" id="filters"></div>
+    <div id="findings"><div class="muted">Select or upload a design.</div></div>
+    <details id="napp"><summary>Rules that don't apply to this ship</summary><div id="na" class="small"></div></details>
+    <div id="meta" class="small muted" style="margin-top:10px"></div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script type="importmap">{"imports":{"three":"/ruletrace/static/three.module.min.js"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "/ruletrace/static/OrbitControls.js";
+
+const PEOPLE = [{label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+                {label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
+                {label:"Ella · admin", user:"ella", roles:"admin"}];
+const AREAS = [["us_ports","US ports (PVAG / ADA)"],["north_american_eca","North American ECA"],["us_caribbean_eca","US Caribbean ECA"],
+               ["baltic_sea","Baltic Sea ECA"],["north_sea","North Sea ECA"],["mediterranean","Mediterranean (SOx ECA)"],["canadian_arctic","Canadian Arctic ECA"]];
+const COLORS = {fail:0xd64545, warn:0xd88b16, unknown:0x6b7c93, pass:0x2e8b57, none:0xc4ccd4};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let current = null, result = null, filter = "issues", selected = null;
+
+PEOPLE.forEach((p,i) => $("#who").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p.label)}</option>`));
+$("#who").value = store.get("ruletrace.who") || "1";
+$("#who").onchange = () => { store.set("ruletrace.who", $("#who").value); boot(); };
+AREAS.forEach(([k,l]) => $("#areas").insertAdjacentHTML("beforeend", `<label><input type="checkbox" value="${k}"> ${esc(l)}</label>`));
+
+function headers(){ const p = PEOPLE[+$("#who").value]; return {"X-User":p.user, "X-Roles":p.roles, "X-User-Kind":"human"}; }
+async function api(path, opts={}){
+  const r = await fetch(path, {...opts, headers:{...(opts.body && !(opts.body instanceof FormData) ? {"Content-Type":"application/json"} : {}), ...headers()},
+    body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `HTTP ${r.status}`);
+  return d;
+}
+function toast(m, err){ const t=$("#toast"); t.textContent=m; t.className="toast"+(err?" err":""); t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none", err?6000:2500); }
+const guard = fn => async (...a) => { try { await fn(...a) } catch(e){ toast(e.message, true) } };
+
+// ---------- 3D scene ----------
+const view = $("#view");
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9eef2);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(200, 300, 150); scene.add(sun);
+let group = new THREE.Group(); scene.add(group);
+const meshes = new Map();
+function resize(){ const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / Math.max(h,1); camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(view); resize();
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+// ship frame (x fwd, y stbd, z up) -> three (x, z, y)
+function placeBox(b, color, opts={}){
+  const [x,y,z,lx,wy,hz] = b;
+  const g = new THREE.BoxGeometry(Math.max(lx,0.05), Math.max(hz,0.05), Math.max(wy,0.05));
+  const m = new THREE.MeshStandardMaterial({color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthWrite: !opts.opacity});
+  const mesh = new THREE.Mesh(g, m); mesh.position.set(x + lx/2, z + hz/2, y + wy/2);
+  if (opts.edges) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color, transparent:true, opacity:.9})); mesh.add(e); }
+  group.add(mesh); return mesh;
+}
+function statusOf(id){
+  if (!result) return "none";
+  const fs = result.findings.filter(f => f.element_id === id || (f.highlight||[]).includes(id));
+  for (const s of ["fail","warn","unknown","pass"]) if (fs.some(f => f.status === s)) return s;
+  return "none";
+}
+function buildScene(){
+  scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear();
+  const ship = result.ship, L = ship.length_m || 100, B = ship.breadth_m || 20;
+  const hull = placeBox([0, -B/2, 0, L, B, 0.01], 0x9aa8b6, {opacity:.25});
+  const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(L, 1, B)), new THREE.LineBasicMaterial({color:0x7a8896}));
+  outline.position.set(L/2, 0, 0); group.add(outline);
+  const grid = new THREE.GridHelper(Math.max(L, B) * 1.2, 24, 0xb4bfca, 0xd3dae0); grid.position.set(L/2, -0.01, 0); group.add(grid);
+  for (const el of result.elements) {
+    if (!el.box) continue;
+    const st = statusOf(el.id), zone = el.type === "fire_zone";
+    let mesh;
+    if (el.type === "nav_light") {
+      const [x,y,z,lx,wy,hz] = el.box;
+      mesh = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 14), new THREE.MeshStandardMaterial({color: COLORS[st]}));
+      mesh.position.set(x + lx/2, z + hz/2, y + wy/2); group.add(mesh);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, z), new THREE.MeshStandardMaterial({color:0x8a96a3}));
+      mast.position.set(x + lx/2, z/2, y + wy/2); group.add(mast);
+    } else {
+      mesh = placeBox(el.box, COLORS[st], zone ? {opacity: st === "none" || st === "pass" ? .08 : .22, edges:true} : {edges: st === "fail"});
+    }
+    mesh.userData = {id: el.id, el}; meshes.set(el.id, mesh);
+  }
+  frame();
+}
+function frame(id){
+  const box = new THREE.Box3();
+  if (id && meshes.get(id)) box.setFromObject(meshes.get(id)); else box.setFromObject(group);
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length() || 10;
+  const d = id ? Math.max(s * 3, 25) : s * 0.9;
+  camera.position.set(c.x - d * .55, c.y + d * .55, c.z + d * .75); controls.target.copy(c); controls.update();
+}
+function highlight(ids){
+  for (const [id, m] of meshes) {
+    const on = ids.includes(id);
+    m.scale.setScalar(on ? 1.04 : 1);
+    m.material.emissive = new THREE.Color(on ? 0x331111 : 0x000000);
+    if (m.userData.el.type !== "fire_zone" && m.material) m.material.opacity = 1;
+  }
+}
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+function pick(ev){
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects([...meshes.values()], false);
+  const pref = hits.find(h => h.object.userData.el.type !== "fire_zone") || hits[0];
+  return pref ? pref.object.userData : null;
+}
+renderer.domElement.addEventListener("mousemove", ev => {
+  const u = pick(ev), h = $("#hover");
+  if (!u) { h.style.display = "none"; return; }
+  const r = view.getBoundingClientRect(); h.style.display = "block";
+  h.style.left = (ev.clientX - r.left + 12) + "px"; h.style.top = (ev.clientY - r.top + 12) + "px";
+  h.textContent = `${u.el.name || u.id} · ${statusLabel(statusOf(u.id))}`;
+});
+renderer.domElement.addEventListener("click", ev => {
+  const u = pick(ev); if (!u) return;
+  const f = result.findings.find(f => (f.element_id === u.id || (f.highlight||[]).includes(u.id)) && f.status !== "pass")
+         || result.findings.find(f => f.element_id === u.id);
+  if (f) { filter = "all"; renderFindings(); select(result.findings.indexOf(f)); }
+});
+const statusLabel = s => ({fail:"fails", warn:"warning", unknown:"can't check", pass:"passes", none:"not checked"}[s]);
+
+// ---------- panels ----------
+async function boot(){
+  const [designs, samples] = await Promise.all([api("/ruletrace/designs"), api("/ruletrace/samples")]);
+  $("#samples").innerHTML = samples.map(s => `<div class="it" data-sample="${esc(s.name)}">${esc(s.title)}</div>`).join("");
+  document.querySelectorAll("[data-sample]").forEach(e => e.onclick = guard(async () => {
+    const d = await api(`/ruletrace/designs/sample/${e.dataset.sample}`, {method:"POST"}); toast("Sample loaded"); await boot(); await open(d.id); }));
+  $("#designs").innerHTML = designs.length ? designs.map(d => `<div class="it ${current===d.id?"sel":""}" data-id="${esc(d.id)}">
+      <b>${esc(d.title || d.filename)}</b><div class="muted">${esc(d.format)} · ${d.elements} elements</div></div>`).join("")
+    : `<div class="muted">No designs yet. Load a sample below or upload a model.</div>`;
+  document.querySelectorAll("[data-id]").forEach(e => e.onclick = guard(() => open(e.dataset.id)));
+  if (!designs.length && samples.length) $("#napp").open = false;
+}
+async function open(id, overrides){
+  current = id;
+  document.querySelectorAll("#designs .it").forEach(e => e.classList.toggle("sel", e.dataset.id === id));
+  result = await api(`/ruletrace/designs/${id}/check`, {method:"POST", body:{ship_overrides: overrides || {}}});
+  const s = result.ship;
+  $("#ship").className = "small";
+  $("#ship").innerHTML = `<b>${esc(s.name)}</b><br>${esc(s.ship_type)} · ${s.passengers} passengers · ${s.length_m} × ${s.breadth_m} m · ${Number(s.gross_tonnage).toLocaleString()} GT · flag ${esc(s.flag || "–")}`;
+  document.querySelectorAll("#areas input").forEach(i => i.checked = (s.operating_areas || []).includes(i.value));
+  $("#keel").value = s.keel_laid || "";
+  buildScene(); renderFindings();
+  $("#meta").innerHTML = `Rule pack ${esc(result.rules_sha256.slice(0,12))}… · design ${esc(result.design_sha256.slice(0,12))}… · recorded as audit entry #${result.audit_seq}`
+    + (Object.keys(result.what_if||{}).length ? `<br>What-if: ${esc(JSON.stringify(result.what_if))}` : "");
+}
+function renderFindings(){
+  const c = result.counts;
+  $("#counts").innerHTML = ["fail","warn","unknown","pass"].map(s => `<div><b style="color:var(--${s})">${c[s]}</b>${statusLabel(s)}</div>`).join("");
+  const F = {issues:"Issues", fail:"Fails", warn:"Warnings", unknown:"Can't check", all:"All"};
+  $("#filters").innerHTML = Object.entries(F).map(([k,l]) => `<button class="${filter===k?"on":""}" data-f="${k}">${l}</button>`).join("");
+  document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter = b.dataset.f; renderFindings(); });
+  const show = result.findings.map((f,i) => [f,i]).filter(([f]) => filter === "all" || (filter === "issues" ? f.status !== "pass" : f.status === filter));
+  $("#findings").innerHTML = show.length ? show.map(([f,i]) => `<div class="f ${selected===i?"sel":""}" data-i="${i}">
+    <div class="h"><span class="t">${esc(f.title)}</span><span class="pill ${f.status}">${statusLabel(f.status)}</span></div>
+    <div class="small muted">${esc(f.element_name)}${f.deck?" · "+esc(f.deck):""} · ${esc(f.ref)}</div>
+    ${selected===i ? detail(f) : `<div class="small" style="margin-top:3px">${esc(f.message)}</div>`}</div>`).join("")
+    : `<div class="muted">Nothing in this filter.</div>`;
+  document.querySelectorAll(".f").forEach(e => e.onclick = () => select(+e.dataset.i));
+  $("#na").innerHTML = result.rules_not_applicable.length ? result.rules_not_applicable.map(r => `<div style="margin:6px 0"><b>${esc(r.title)}</b> <span class="muted">${esc(r.regime)} ${esc(r.ref)}</span>
+      <div class="muted">${r.reasons.map(esc).join("; ")}</div></div>`).join("") : "All rules in the pack apply.";
+}
+function detail(f){
+  return `<div class="req"><span>Required</span><b>${esc(f.required || "–")}</b><span>Design</span><b style="color:var(--${f.status})">${esc(f.actual ?? "not given")}</b>
+    <span>Measured</span><span style="color:var(--ink)">${esc(f.measured || "–")}</span></div>
+    <div class="small">${esc(f.message)}</div>
+    ${f.why_rule ? `<div class="small" style="margin-top:4px"><b>Why it matters:</b> ${esc(f.why_rule)}</div>` : ""}
+    ${f.fix ? `<div class="small" style="margin-top:4px"><b>Fix:</b> ${esc(f.fix)}</div>` : ""}
+    ${f.quote ? `<div class="quote">"${esc(f.quote)}"</div>` : ""}
+    <div class="small"><span class="badge ${f.verified?"":"unv"}">${f.verified?"value checked against published text":"value not yet verified: confirm with the official text"}</span>
+    ${f.source_url ? ` <a href="${esc(f.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</div>`;
+}
+function select(i){
+  selected = i; renderFindings();
+  const f = result.findings[i], ids = [f.element_id, ...(f.highlight||[])].filter(Boolean);
+  highlight(ids); frame(ids[0]);
+  document.querySelector(`.f[data-i="${i}"]`)?.scrollIntoView({block:"nearest"});
+}
+$("#recheck").onclick = guard(async () => {
+  if (!current) return toast("Select a design first", true);
+  const areas = [...document.querySelectorAll("#areas input:checked")].map(i => i.value);
+  const ov = {operating_areas: areas}; if ($("#keel").value) ov.keel_laid = $("#keel").value;
+  selected = null; await open(current, ov); toast("Re-checked with the new profile");
+});
+$("#up").onclick = guard(async () => {
+  const f = $("#file").files[0]; if (!f) return toast("Choose a .json or .ifc file first", true);
+  const fd = new FormData(); fd.append("file", f);
+  const d = await api("/ruletrace/designs", {method:"POST", body: fd});
+  $("#file").value = ""; toast(`${d.filename}: ${d.elements} elements read`); await boot(); await open(d.id);
+});
+guard(boot)();
+</script>
+</body>
+</html>

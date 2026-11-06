@@ -1,0 +1,59 @@
+# US Passenger Vessel Accessibility Guidelines (PVAG) and ADA Standards.
+# They apply to passenger vessels serving US ports. PVAG were published by the US Access Board as
+# proposed guidelines; cruise ship projects commonly design to them. Confirm the status for each project.
+
+- id: PVAG-V404.2.3-DOOR-WIDTH
+  title: Accessible door clear width
+  regime: PVAG
+  ref: "PVAG V404.2.3"
+  quote: "Door openings shall provide a clear width of 32 inches (815 mm) minimum."
+  source_url: https://www.access-board.gov/pvag/ch-v4/
+  verified: true
+  applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
+  target: {type: door, when: {accessible_route: true}}
+  check: {property: clear_width, requirement: "at least 815 mm"}
+  severity: major
+  why: A wheelchair user needs at least 815 mm to pass through a door.
+  fix: Use a door with at least 815 mm clear opening (measured from door face to the opposite stop).
+
+- id: PVAG-V403.5.1-ROUTE-WIDTH
+  title: Accessible route clear width
+  regime: PVAG
+  ref: "PVAG V403.5.1"
+  quote: "the minimum clear width of walking surfaces is 36 inches (915 mm) minimum"
+  source_url: https://www.access-board.gov/pvag/ch-v4/
+  verified: true
+  applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
+  target: {type: corridor, when: {accessible_route: true}}
+  check: {property: clear_width, requirement: "at least 915 mm"}
+  severity: major
+  why: Corridors on an accessible route must let a wheelchair pass along them.
+  fix: Widen the corridor to at least 915 mm clear width.
+
+- id: ADA-405.2-RAMP-SLOPE
+  title: Ramp running slope
+  regime: ADA
+  ref: "2010 ADA Standards 405.2"
+  quote: "Ramp runs shall have a running slope not steeper than 1:12."
+  source_url: https://nippon.zaidan.info/seikabutsu/2002/00256/contents/022.htm
+  verified: true
+  applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
+  target: {type: ramp, when: {accessible_route: true}}
+  check: {property: running_slope, slope_max: "1:12"}
+  severity: major
+  why: Steeper ramps can't be used safely by wheelchair users.
+  fix: Lengthen the ramp so its running slope is 1:12 or gentler.
+
+- id: ADA-404.2.5-THRESHOLD
+  title: Door threshold height
+  regime: ADA
+  ref: "2010 ADA Standards 404.2.5"
+  quote: "if a threshold is provided, Chapter 4 limits the height to 1/2-inch, maximum"
+  source_url: https://idighardware.com/2019/09/decoded-thresholds-and-changes-in-level-november-2019/
+  verified: true
+  applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
+  target: {type: door, when: {accessible_route: true}}
+  check: {property: threshold_height, requirement: "at most 13 mm"}
+  severity: minor
+  why: Higher sills stop wheelchairs; ships often need a ramped sill instead.
+  fix: Limit the threshold to 1/2 inch (13 mm) or add a compliant ramped sill.

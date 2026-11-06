@@ -1,0 +1,44 @@
+# COLREG Annex I: positioning of navigation lights. Power-driven vessels of 20 m or more.
+
+- id: COLREG-ANNEX-I-2a-i-MASTHEAD-HEIGHT
+  title: Forward masthead light height above the hull
+  regime: COLREG
+  ref: "COLREG Annex I, section 2(a)(i)"
+  quote: "height above the hull of not less than 6 metres, and, if the breadth of the vessel exceeds 6 metres, then at a height above the hull not less than such breadth"
+  source_url: https://www.navcen.uscg.gov/node/258
+  verified: true
+  applies_if: {length_m_at_least: 20}
+  target: {type: nav_light, when: {role: forward_masthead}}
+  check: {property: height_above_hull, requirement_expr: "at least {min(max(6, ship.breadth_m), 12)} m"}
+  severity: major
+  why: The masthead light must be high enough to be seen over the hull from other ships. It need not be higher than 12 m.
+  fix: Raise the forward masthead light to the required height above the uppermost continuous deck.
+
+- id: COLREG-ANNEX-I-2a-ii-MASTHEAD-SEPARATION
+  title: After masthead light at least 4.5 m above the forward one
+  regime: COLREG
+  ref: "COLREG Annex I, section 2(a)(ii)"
+  quote: "the after one shall be at least 4.5 metres vertically higher than the forward one"
+  source_url: https://www.navcen.uscg.gov/node/258
+  verified: true
+  applies_if: {length_m_at_least: 50}
+  target: {type: nav_light, when: {role: after_masthead}, highlight_roles: [forward_masthead]}
+  check: {property: height_above_hull, requirement_expr: "at least {ref('forward_masthead', 'height_above_hull', 'm') + 4.5} m"}
+  severity: major
+  why: The vertical gap between the two masthead lights shows other ships which way this ship is heading.
+  fix: Raise the after masthead light so it is at least 4.5 m above the forward masthead light.
+
+- id: COLREG-ANNEX-I-3a-MASTHEAD-SPACING
+  title: Horizontal distance between masthead lights
+  regime: COLREG
+  ref: "COLREG Annex I, section 3(a)"
+  quote: "the horizontal distance between them shall not be less than one-half of the length of the vessel but need not be more than 100 metres"
+  source_url: https://www.cultofsea.com/colregs/annexes/annex-1-positioning-and-technical-details-of-lights-and-shapes/
+  verified: true
+  applies_if: {length_m_at_least: 50}
+  target: {type: ship, highlight_roles: [forward_masthead, after_masthead]}
+  check: {actual_expr: "{geom('forward_masthead', 'x_min') - geom('after_masthead', 'x_min')} m",
+          requirement_expr: "at least {min(ship.length_m / 2, 100)} m"}
+  severity: major
+  why: Enough horizontal spacing lets other ships judge this ship's heading from the two lights.
+  fix: Move the masthead lights apart to at least half the ship's length (no more than 100 m is needed).

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ruletrace"
+version = "0.1.0"
+description = "Check ship designs (3D models, drawings, documents) against SOLAS, MARPOL, COLREG, class rules, PVAG and ADA, and show why something is not compliant."
+requires-python = ">=3.10"
+dependencies = ["vartija-core", "pyyaml>=6", "fastapi>=0.110", "python-multipart>=0.0.9"]
+
+[project.optional-dependencies]
+ifc = ["ifcopenshell>=0.8"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.setuptools]
+packages = ["ruletrace"]
+
+[tool.setuptools.package-data]
+ruletrace = ["static/*", "rules/*.yaml", "samples/*.json"]

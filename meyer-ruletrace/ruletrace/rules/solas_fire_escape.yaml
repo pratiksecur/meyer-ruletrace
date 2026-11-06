@@ -1,0 +1,101 @@
+# SOLAS chapter II-2 (fire safety) and the FSS Code: checks that read directly from a design model.
+# "verified: true" = the value was checked against published regulatory text (see source_url).
+# Applicability: chapter II-2 as amended by MSC.99(73) applies to ships constructed on or after 1 July 2002.
+
+- id: SOLAS-II-2-9.2.2.1-MVZ-MAX
+  title: Main vertical zone length
+  regime: SOLAS
+  ref: "SOLAS II-2/9.2.2.1 (passenger ships > 36 passengers)"
+  quote: "The length and width of main vertical zones may be extended to a maximum of 48 m"
+  source_url: https://assets.publishing.service.gov.uk/media/5a7f48cae5274a2e8ab4b3e4/Regulation_9_-_Containment_of_Fire.pdf
+  verified: true
+  applies_if: {passengers_more_than: 36, keel_laid_on_or_after: 2002-07-01}
+  target: {type: fire_zone}
+  check: {property: geom.length, requirement: "at most 48 m"}
+  severity: major
+  why: Fire must be contained within a zone; a longer zone lets fire and smoke spread over a larger area.
+  fix: Move an A-60 zone boundary so that no main vertical zone is longer than 48 m on any deck.
+
+- id: SOLAS-II-2-3.32-MVZ-GENERAL
+  title: Main vertical zone length above the general 40 m
+  regime: SOLAS
+  ref: "SOLAS II-2/3.32 (definition of main vertical zones)"
+  quote: "the mean length and width of which on any deck does not in general exceed 40 metres"
+  source_url: https://legislation.gov.uk/eudr/2009/45/annex/I/chapter/3/adopted?view=plain
+  verified: true
+  applies_if: {passengers_more_than: 36, keel_laid_on_or_after: 2002-07-01}
+  target: {type: fire_zone}
+  check: {property: geom.length, requirement: "at most 40 m"}
+  severity: advisory
+  why: Zones over 40 m are allowed up to 48 m only to line up with watertight bulkheads or fit a large public space.
+  fix: Record the justification (watertight bulkhead alignment or large public space) for class review.
+
+- id: SOLAS-II-2-9.2.2.1.1-MVZ-A60
+  title: Main vertical zone boundaries are A-60
+  regime: SOLAS
+  ref: "SOLAS II-2/9.2.2.1.1"
+  quote: "subdivided into main vertical zones by \"A-60\" class divisions"
+  source_url: https://puc.overheid.nl/doc/PUC_2382_14/2
+  verified: true
+  applies_if: {passengers_more_than: 36, keel_laid_on_or_after: 2002-07-01}
+  target: {type: bulkhead, when: {boundary: main_vertical_zone}}
+  check: {property: fire_class, fire_class_at_least: A-60}
+  severity: major
+  why: Zone boundaries must hold back fire for 60 minutes so a fire stays in one zone.
+  fix: Specify A-60 insulation for this zone boundary bulkhead.
+
+- id: FSS-13.2.1.1-STAIR-WIDTH
+  title: Stairway clear width on escape routes
+  regime: SOLAS / FSS Code
+  ref: "FSS Code ch. 13, 2.1.1 (via SOLAS II-2/13.3.2.4.5), passenger ships"
+  quote: "Stairways shall not be less than 900 mm in clear width."
+  source_url: https://www.dco.uscg.mil/Portals/9/MSC/PRG/PRG.SOLAS-01.2024.01.22.Curved%20or%20Winding%20Stairs%20in%20Escape%20Paths.pdf
+  verified: true
+  applies_if: {passenger_ship: true, keel_laid_on_or_after: 2002-07-01}
+  target: {type: stair, when: {escape_route: true}}
+  check: {property: clear_width, requirement: "at least 900 mm"}
+  severity: major
+  why: Passengers must be able to evacuate quickly; narrow stairs slow evacuation.
+  fix: Widen the stairway to at least 900 mm clear width between handrails.
+
+- id: SOLAS-II-2-13-ESCAPE-DOOR-CORRIDOR
+  title: Doorways and corridors on escape routes
+  regime: SOLAS
+  ref: "SOLAS II-2/28.1.5.3 (2000 text); current text in FSS Code ch. 13: confirm"
+  quote: "Doorways and corridors and intermediate landings included in means of escape shall be not less than 900 mm in clear width."
+  source_url: https://dco.uscg.mil/Portals/9/DCO%20Documents/5p/CSNCOE/recommended%20practices/RP-04%20Escape%20Route%20Deficiencies.pdf
+  verified: false
+  applies_if: {passenger_ship: true, keel_laid_on_or_after: 2002-07-01}
+  target: {type: corridor, when: {escape_route: true}}
+  check: {property: clear_width, requirement: "at least 900 mm"}
+  severity: major
+  why: Escape corridors must stay wide enough for the expected flow of people.
+  fix: Widen the corridor to at least 900 mm clear width (check against the current FSS Code text).
+
+- id: SOLAS-II-2-13-ESCAPE-DOOR
+  title: Doorways on escape routes
+  regime: SOLAS
+  ref: "SOLAS II-2/28.1.5.3 (2000 text); current text in FSS Code ch. 13: confirm"
+  quote: "Doorways and corridors and intermediate landings included in means of escape shall be not less than 900 mm in clear width."
+  source_url: https://dco.uscg.mil/Portals/9/DCO%20Documents/5p/CSNCOE/recommended%20practices/RP-04%20Escape%20Route%20Deficiencies.pdf
+  verified: false
+  applies_if: {passenger_ship: true, keel_laid_on_or_after: 2002-07-01}
+  target: {type: door, when: {escape_route: true}}
+  check: {property: clear_width, requirement: "at least 900 mm"}
+  severity: major
+  why: Escape doors must not create a bottleneck.
+  fix: Use a door with at least 900 mm clear opening on the escape route.
+
+- id: SOLAS-II-2-13.3.2.5.1-LLL-HEIGHT
+  title: Low-location lighting height
+  regime: SOLAS
+  ref: "SOLAS II-2/13.3.2.5.1, passenger ships"
+  quote: "marked by lighting or photoluminescent strip indicators placed not more than 300 mm above the deck"
+  source_url: https://dco.uscg.mil/Portals/9/DCO%20Documents/5p/CSNCOE/recommended%20practices/RP-04%20Escape%20Route%20Deficiencies.pdf
+  verified: true
+  applies_if: {passenger_ship: true, keel_laid_on_or_after: 2002-07-01}
+  target: {type: low_location_lighting}
+  check: {property: height_above_deck, requirement: "at most 300 mm"}
+  severity: major
+  why: In smoke, people crawl or stoop; escape markings must be near the deck to stay visible.
+  fix: Lower the strip so it is at most 300 mm above the deck.

@@ -1,0 +1,108 @@
+{
+  "title": "Demo research vessel (synthetic, not a passenger ship)",
+  "ship": {
+    "name": "RV Demo Tern (synthetic)",
+    "ship_type": "research",
+    "passengers": 0,
+    "persons_total": 30,
+    "length_m": 60,
+    "breadth_m": 15,
+    "gross_tonnage": 1800,
+    "keel_laid": "2026-05-01",
+    "flag": "US",
+    "operating_areas": [
+      "north_american_eca",
+      "us_ports"
+    ],
+    "notes": "Synthetic. Shows that passenger-ship rules are not applied to a research vessel."
+  },
+  "elements": [
+    {
+      "id": "RV-ST1",
+      "type": "stair",
+      "name": "Main stair",
+      "deck": "Main deck",
+      "zone": "",
+      "box": [
+        20,
+        -1,
+        5,
+        4,
+        1,
+        3
+      ],
+      "props": {
+        "escape_route": true,
+        "clear_width": "800 mm"
+      }
+    },
+    {
+      "id": "RV-NL-FWD",
+      "type": "nav_light",
+      "name": "Forward masthead light",
+      "deck": "Mast",
+      "zone": "",
+      "box": [
+        45,
+        -0.2,
+        18,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "props": {
+        "role": "forward_masthead",
+        "height_above_hull": "8 m"
+      }
+    },
+    {
+      "id": "RV-NL-AFT",
+      "type": "nav_light",
+      "name": "After masthead light",
+      "deck": "Mast",
+      "zone": "",
+      "box": [
+        20,
+        -0.2,
+        23,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "props": {
+        "role": "after_masthead",
+        "height_above_hull": "13.5 m"
+      }
+    },
+    {
+      "id": "RV-DE-1",
+      "type": "diesel_engine",
+      "name": "Main generator 1",
+      "deck": "Engine room",
+      "zone": "",
+      "box": [
+        10,
+        -4,
+        1,
+        5,
+        2,
+        3
+      ],
+      "props": {
+        "nox_tier": "III"
+      }
+    }
+  ],
+  "expected": [
+    {
+      "rule_id": "COLREG-ANNEX-I-2a-i-MASTHEAD-HEIGHT",
+      "element_id": "RV-NL-FWD",
+      "status": "fail"
+    },
+    {
+      "rule_id": "COLREG-ANNEX-I-3a-MASTHEAD-SPACING",
+      "element_id": null,
+      "status": "fail"
+    }
+  ]
+}
