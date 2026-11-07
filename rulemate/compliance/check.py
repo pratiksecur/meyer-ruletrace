@@ -200,6 +200,29 @@ def _compare(v: float, cmp: str, limit: float) -> bool:
     return {">=": v >= limit - eps, ">": v > limit + eps, "<=": v <= limit + eps, "<": v < limit - eps}[cmp]
 
 
+# words that only say which dimension is meant; a match needs a more specific word in common as well
+_DIMENSION_WORDS = set(
+    "width wide height high length long depth deep size spacing space distance clear clearance minimum maximum "
+    "min max dimension dimensions overall total value measured diameter area volume thickness level above below "
+    "between from to of the a an per each".split())
+MAGNITUDE = 10.0  # design value and limit more than 10x apart: not the same quantity
+
+
+def _plausible(row: DesignRow, l: Limit) -> bool:
+    if row.value is not None and l.value:
+        try:
+            v = convert(row.value, row.unit, l.unit)
+        except UnitError:
+            return False
+        if v and not (1 / MAGNITUDE <= abs(v) / abs(l.value) <= MAGNITUDE):
+            return False
+    words = {w for w in tokenize(designer_to_rule_terms(row.parameter)) if w not in _DIMENSION_WORDS and len(w) > 2}
+    if not words:
+        return True  # only generic words ("clear width"): leave it to the semantic match and the space qualifier
+    text = set(tokenize(f"{l.parameter} {l.subject} {l.context} {l.qualifier or ''} {l.clause_id}"))
+    return any(any(t.startswith(w[:5]) or w.startswith(t[:5]) for t in text if len(t) > 2) for w in words)
+
+
 def evaluate_row(row: DesignRow, matcher: Matcher) -> RowResult:
     def review(reason: str, limits=None) -> RowResult:
         return RowResult(row=row, verdict="NEEDS REVIEW", reason=reason, limits=limits or [])
@@ -210,6 +233,11 @@ def evaluate_row(row: DesignRow, matcher: Matcher) -> RowResult:
     if not cands:
         return review(f"No limit in the rules is stated in a unit compatible with '{row.unit}'."
                       if row.unit else "No unit given for the design value.")
+    # a limit can only apply if it measures the same kind of thing: same order of magnitude (a 60 m ship length
+    # is not a 68 cm berth width) and at least one specific word in common ("frame spacing" is not grab-bar spacing)
+    cands = [i for i in cands if _plausible(row, matcher.limits[i])]
+    if not cands:
+        return review(f"No limit in the rules matches '{row.parameter}' (none measures this kind of value).")
 
     sims = matcher.similarities(row)
     best = max(float(sims[i]) for i in cands)

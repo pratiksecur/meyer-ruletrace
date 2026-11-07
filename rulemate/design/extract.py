@@ -111,6 +111,7 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+MAX_PX = 7200  # longest side of a rendered sheet for OCR
 TILE = 2000  # pixels; OCR shrinks large images, so big sheets are also read in overlapping tiles
 OVERLAP = 500
 SINGLE_PASS_MAX = 3600
@@ -119,12 +120,16 @@ SINGLE_PASS_MAX = 3600
 def ocr_page(path: Path, page_no: int, dpi: int = DPI) -> list[Word]:
     """OCR one page (1-based). Cached per file content, page and resolution. Positions are in PDF points.
     Small drawing text (CAD sheets printed at half size) needs dpi 300 or more."""
+    import pdfplumber
+
+    with pdfplumber.open(path) as pdf:
+        pw, ph = float(pdf.pages[page_no - 1].width), float(pdf.pages[page_no - 1].height)
+    dpi = max(72, min(dpi, int(MAX_PX * 72 / max(pw, ph))))  # A0 at 300 dpi would be 14000 px: too much memory
     pt = 72 / dpi
     cache = OCR_CACHE / f"{_file_hash(path)}_p{page_no}_{dpi}_v3.json"
     if cache.exists():
         return [Word(**w) for w in json.loads(cache.read_text())]
     import numpy as np
-    import pdfplumber
 
     with pdfplumber.open(path) as pdf:
         img = np.array(pdf.pages[page_no - 1].to_image(resolution=dpi).original.convert("RGB"))
