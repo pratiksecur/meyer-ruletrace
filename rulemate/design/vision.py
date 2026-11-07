@@ -74,17 +74,21 @@ def ask_gemini(llm, png: bytes, max_tokens: int = 32000, prompt: str | None = No
     import hashlib
 
     prompt = prompt or PROMPT
-    key = hashlib.sha1(png + llm.model.encode() + prompt.encode()).hexdigest()[:20]
-    cache = CACHE / f"{key}.json"
-    if cache.exists():
-        raw = json.loads(cache.read_text())["raw"]
+    # a reading by any of the configured Gemini models counts (the model actually used is stored with it)
+    names = list(dict.fromkeys([llm.model] + list(getattr(llm, "models", []))))
+    hit = next((CACHE / f"{hashlib.sha1(png + m.encode() + prompt.encode()).hexdigest()[:20]}.json" for m in names
+                if (CACHE / f"{hashlib.sha1(png + m.encode() + prompt.encode()).hexdigest()[:20]}.json").exists()), None)
+    if hit is not None:
+        raw = json.loads(hit.read_text())["raw"]
     else:
         url = "data:image/png;base64," + base64.b64encode(png).decode()
         messages = [{"role": "user", "content": [{"type": "text", "text": prompt},
                                                  {"type": "image_url", "image_url": {"url": url}}]}]
         raw = llm.complete(messages, max_tokens=max_tokens)
+        used = llm.model  # after a rotation, the model that answered
         CACHE.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"model": llm.model, "raw": raw}))
+        (CACHE / f"{hashlib.sha1(png + used.encode() + prompt.encode()).hexdigest()[:20]}.json").write_text(
+            json.dumps({"model": used, "raw": raw}))
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
@@ -131,7 +135,8 @@ def verify(proposals: list[dict], words: list[Word], page_w: float, page_h: floa
         num_ok = bool(num) and any(_sim(num, w.text) >= 0.8 for w in inside)
         r.confirmed = label_ok or num_ok
         r.evidence = f'OCR at that spot: "{text[:60]}"' if inside else "no OCR text at that spot"
-        printed = re.search(r"\((\d{1,2})\)", label)  # "SENIOR SCIENTIST (2)": the drawing prints the berths
+        # berths printed on the drawing: "SENIOR SCIENTIST (2)", "2M" / "2 MAN" (2-man cabin), DOUBLE / SINGLE
+        printed = re.search(r"\((\d{1,2})\)", label) or re.search(r"(?<![\d.])(\d)\s*-?\s*M(?:AN)?\b", label.upper())
         stated = int(printed.group(1)) if printed else next((v for k, v in KIND_WORDS.items() if k in label.lower()), None)
         if r.berths is not None and stated is not None:
             r.berths_confirmed = r.berths == stated

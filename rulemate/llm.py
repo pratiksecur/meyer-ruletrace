@@ -49,7 +49,7 @@ class OpenAICompatible:
         if not self.api_key:
             raise LLMError(f"{self.name}: no API key set in .env")
         body: dict = {"model": self.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-        if self.reasoning_effort and "gpt-oss" in self.model:
+        if self.reasoning_effort and ("gpt-oss" in self.model or self.name == "gemini"):
             body["reasoning_effort"] = self.reasoning_effort
         waited = 0.0
         while True:
@@ -74,7 +74,9 @@ class OpenAICompatible:
             time.sleep(wait)
             waited += wait
         if r.status_code != 200:
-            raise LLMError(f"{self.name}: HTTP {r.status_code}: {r.text[:300]}")
+            err = LLMError(f"{self.name}: HTTP {r.status_code}: {r.text[:300]}")
+            err.status, err.body = r.status_code, r.text
+            raise err
         content = r.json()["choices"][0]["message"].get("content") or ""
         if not content.strip():
             raise LLMError(f"{self.name}: empty response")
@@ -153,6 +155,85 @@ class ChainLLM:
         return self.last_used or "+".join(p.label for p in self.providers)
 
 
+# best first; each has its own free daily quota
+GEMINI_FREE_MODELS = ("gemini-3.5-flash,gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash,gemini-3-flash-preview,"
+                      "gemini-flash-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest")
+
+
+class GeminiRotation:
+    """Several Gemini models behind one provider. A model whose free daily quota is used up (or that this key
+    cannot use) is skipped for the rest of the day; a busy model is skipped for this call only."""
+
+    name = "gemini"
+
+    def __init__(self, models: str, base_url: str, api_key: str, timeout: float = 25.0):
+        self.models = [m.strip() for m in models.split(",") if m.strip()]
+        self.base_url, self.api_key, self.timeout = base_url, api_key, timeout
+        self.last = self.models[0] if self.models else ""
+
+    @property
+    def model(self) -> str:
+        return self.last
+
+    @model.setter
+    def model(self, value: str) -> None:  # "a,b,c" sets the list; a single name puts it first
+        names = [m.strip() for m in value.split(",") if m.strip()]
+        self.models = names if len(names) > 1 else names + [m for m in self.models if m not in names]
+        self.last = self.models[0]
+
+    @property
+    def label(self) -> str:
+        return f"gemini:{self.last}"
+
+    def _spent_file(self):
+        from .config import CACHE_DIR
+
+        return CACHE_DIR / "gemini_quota.json"
+
+    def _spent(self) -> dict:
+        import json
+        import time
+
+        try:
+            d = json.loads(self._spent_file().read_text())
+        except (OSError, ValueError):
+            return {}
+        return {m: t for m, t in d.items() if time.time() - t < 12 * 3600}  # free quotas reset daily
+
+    def _mark_spent(self, model: str) -> None:
+        import json
+        import time
+
+        d = self._spent()
+        d[model] = time.time()
+        f = self._spent_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(d))
+
+    def complete(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 900) -> str:
+        if not self.api_key:
+            raise LLMError("gemini: no API key set in .env (GEMINI_API_KEY)")
+        spent, errors = self._spent(), []
+        for m in self.models:
+            if m in spent:
+                continue
+            p = OpenAICompatible(base_url=self.base_url, api_key=self.api_key, model=m, name="gemini", timeout=self.timeout,
+                                 reasoning_effort=os.getenv("GEMINI_REASONING_EFFORT", "low"))
+            try:
+                # Gemini's thinking counts against max_tokens: leave room so the answer is not cut off
+                out = p.complete(messages, temperature=temperature, max_tokens=max(max_tokens, 8192))
+                self.last = m
+                return out
+            except LLMError as e:
+                status, body = getattr(e, "status", None), getattr(e, "body", "")
+                if status == 404 or (status == 429 and ("PerDay" in body or "quota" in body.lower())):
+                    self._mark_spent(m)  # not for this key, or today's free quota used
+                elif not (status in (429, 500, 503) or "Timeout" in str(e)):
+                    raise
+                errors.append(f"{m}: {str(e)[:60]}")
+        raise LLMError("gemini: every model is out of free quota or busy today; " + " | ".join(errors[-3:]))
+
+
 def make_provider(name: str):
     name = name.strip().lower()
     timeout = float(os.getenv("LLM_TIMEOUT", "25"))
@@ -176,14 +257,18 @@ def make_provider(name: str):
             reasoning_effort=effort,
         )
     if name == "gemini":
-        # Google Gemini through its OpenAI-compatible endpoint (text and images); key from Google AI Studio
-        return OpenAICompatible(
+        # Google Gemini through its OpenAI-compatible endpoint (text and images); key from Google AI Studio.
+        # GEMINI_MODEL may list several models: free keys get ~20 requests per model per day, so the next one is
+        # used when a model's daily quota is spent, it is busy, or it is not available for this key.
+        g = GeminiRotation(
+            models=GEMINI_FREE_MODELS,
             base_url=os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
             api_key=os.getenv("GEMINI_API_KEY", ""),
-            model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
-            name="gemini",
             timeout=float(os.getenv("GEMINI_TIMEOUT", str(timeout))),
         )
+        if os.getenv("GEMINI_MODEL"):
+            g.model = os.getenv("GEMINI_MODEL")  # one name: tried first, the free list after it; a list: exactly that
+        return g
     if name == "ollama":
         return Ollama(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

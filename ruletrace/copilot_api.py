@@ -72,14 +72,16 @@ def configure(upload_dir: Path) -> Path:
 
 
 def provider() -> str:
-    return os.getenv("COPILOT_LLM_PROVIDER", "gemini,ollama")
+    # Gemini (rotating over the free flash models), then Groq if a key is set, then the local model
+    return os.getenv("COPILOT_LLM_PROVIDER", "gemini,groq,ollama")
 
 
 def vision_llm():
     from rulemate.llm import make_provider
 
-    llm = make_provider("gemini")
-    llm.model = os.getenv("GEMINI_VISION_MODEL", "gemini-3.5-flash")
+    llm = make_provider("gemini")  # rotates over the free flash models when one's daily quota is used up
+    if os.getenv("GEMINI_VISION_MODEL"):
+        llm.model = os.getenv("GEMINI_VISION_MODEL")
     llm.timeout = max(llm.timeout, 240)
     return llm
 
@@ -144,7 +146,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
 
     def _require():
         try:
-            import rulemate  # noqa: F401
+            import rulemate.config  # noqa: F401  (also loads .env: GEMINI_API_KEY, GROQ_API_KEY)
             import rank_bm25  # noqa: F401
             import pint  # noqa: F401
         except ImportError as exc:
