@@ -246,5 +246,7 @@ def make_router(app) -> APIRouter:
 
     from .llm_api import add_llm_routes  # local-LLM helpers (explain, draft rule, ask)
     add_llm_routes(app, router, engineer, _path)
+    from .copilot_api import add_copilot_routes  # RuleMate Copilot: full-text Q&A, Gemini reads drawings/pictures
+    add_copilot_routes(app, router, engineer, _path, _save)
 
     return router
