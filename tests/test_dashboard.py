@@ -32,3 +32,8 @@ def test_audit_record_and_access(client):
     assert a["entries"][0]["payload"]["design_id"] == did
     assert client.get("/ruletrace/audit", headers=CEO).status_code == 403
     assert client.get("/ruletrace/summary", headers=OUTSIDER).status_code == 403
+
+
+def test_answer_keys_are_not_listed_as_samples(client):
+    names = [s["name"] for s in client.get("/ruletrace/samples", headers=ENG).json()]
+    assert "demo_ga_drawing" in names and not any(n.endswith(".expected") for n in names)

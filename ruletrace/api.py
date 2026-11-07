@@ -137,6 +137,8 @@ def make_router(app) -> APIRouter:
     def samples(who: Principal = Depends(engineer)) -> list[dict]:
         out = []
         for p in sorted(SAMPLES.glob("*.json")):
+            if p.stem.endswith(".expected"):  # answer key for scripts/evaluate.py, not a design
+                continue
             d = json.loads(p.read_text(encoding="utf-8"))
             out.append({"name": p.stem, "title": d.get("title", p.stem)})
         if (SAMPLES / "demo_deck_section.ifc").exists():

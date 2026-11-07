@@ -46,7 +46,7 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{
 </head>
 <body>
 <header>
-  <h1>RuleTrace</h1><span class="sub">Dashboard: every number here comes from the design checks run in RuleTrace</span>
+  <h1>RuleTrace</h1><span class="sub">Summary of every ship design checked in RuleTrace</span>
   <span class="sp"></span>
   <label class="small" for="who">Signed in as</label>
   <select id="who"></select>
@@ -96,56 +96,50 @@ async function load(){
 function engineerView(){
   const t = S.totals, c = S.chain;
   $("#main").innerHTML = `
-  <div class="kpis">
-    <div class="kpi"><b>${t.designs}</b><span>designs checked</span></div>
-    <div class="kpi"><b class="c-fail">${t.open_fail}</b><span>non-compliances open</span></div>
-    <div class="kpi"><b class="c-unknown">${t.open_unknown}</b><span>can't check (information missing)</span></div>
-    <div class="kpi"><b class="c-warn">${t.open_warn}</b><span>warnings to review</span></div>
-    <div class="kpi"><b>${t.checks_run}</b><span>checks run, all recorded</span></div>
+  <div class="hero" style="font-size:19px">${t.designs} design${t.designs===1?"":"s"} checked · <span style="color:var(--fail)">${t.open_fail} problem${t.open_fail===1?"":"s"} to fix</span></div>
+  <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+    <div class="kpi"><b class="c-fail">${t.open_fail}</b><span>problems to fix (a rule is broken)</span></div>
+    <div class="kpi"><b class="c-unknown">${t.open_unknown}</b><span>can't check yet (the design is missing a value)</span></div>
+    <div class="kpi"><b class="c-warn">${t.open_warn}</b><span>worth a second look</span></div>
   </div>
   <div class="card"><h2>Designs</h2>
-    <table><thead><tr><th>Design</th><th>Status</th><th class="num">Fail</th><th class="num">Warn</th><th class="num">Can't check</th><th class="num">Pass</th><th>Last check</th><th></th></tr></thead>
+    <table><thead><tr><th>Design</th><th>Result</th><th class="num">Problems</th><th>Checked</th><th></th></tr></thead>
     <tbody>${S.designs.map((d,i) => `
-      <tr><td><b>${esc(d.title)}</b><div class="small muted">${esc(d.ship)} · ${esc(d.format)} · ${d.elements} elements${Object.keys(d.what_if).length ? " · what-if: " + esc(Object.keys(d.what_if).join(", ")) : ""}</div></td>
+      <tr><td><b>${esc(d.title)}</b><div class="small muted">${esc(d.ship)}</div></td>
         <td><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></td>
-        <td class="num c-fail">${d.counts.fail||0}</td><td class="num c-warn">${d.counts.warn||0}</td><td class="num c-unknown">${d.counts.unknown||0}</td><td class="num c-pass">${d.counts.pass||0}</td>
-        <td class="small">${esc(d.checked_by)}, ${esc(when(d.checked_at))}<div class="muted">audit entry #${d.audit_seq}</div></td>
-        <td class="small" style="white-space:nowrap">${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}">Open in 3D</a> · <a href="#" data-rm="${esc(d.design_id)}">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
-      ${d.fails.length ? `<tr class="sub"><td colspan="8">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)} · ${esc(f.element_id || "whole ship")} · ${esc(f.severity)}</span></div>`).join("")}</td></tr>` : ""}`).join("")}
+        <td class="num c-fail"><b>${d.counts.fail||0}</b></td>
+        <td class="small">${esc(when(d.checked_at))}<div class="muted">by ${esc(d.checked_by)}</div></td>
+        <td class="small" style="white-space:nowrap;text-align:right">${d.fails.length ? `<a href="#" data-x="${i}">Show problems</a> · ` : ""}${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}"><b>Open in 3D</b></a> · <a href="#" data-rm="${esc(d.design_id)}" class="muted">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
+      <tr class="sub" id="x${i}" style="display:none"><td colspan="5">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)}</span></div>`).join("")}</td></tr>`).join("")}
     </tbody></table>
-    <div class="small muted" style="margin-top:8px">A design uploaded more than once (same file fingerprint) is shown once, with its latest check.</div>
   </div>
   <div class="grid g2">
-    <div class="card"><h2>Open non-compliances by regulation</h2>${bars()}
-      <div class="small muted" style="margin-top:10px">Rule pack: ${S.rule_pack.count} rules from ${S.rule_pack.regimes.map(esc).join(", ")}.</div></div>
-    <div class="card"><h2>Audit trail of design checks</h2>
-      <div class="chain ${c.ok ? "ok" : "bad"}"><b>${c.ok ? "✓ Record intact" : "✗ Record has been changed"}</b>
-        <span class="small">${c.entries} entries${c.ok ? "" : " · broken at #" + c.first_broken_seq + ": " + esc(c.reason)}</span>
-        <span class="mono small">head ${esc((c.head_hash||"").slice(0,16))}…</span></div>
-      <div style="display:flex;gap:8px;margin-bottom:8px"><button id="verify">Verify again</button><button id="dl" class="primary">Download audit record</button></div>
-      ${S.activity.map(a => `<div class="act"><span class="mono muted">#${a.seq}</span>
-        <span><b>${esc(a.actor)}</b> checked ${esc(a.file)}${Object.keys(a.what_if).length ? ` <span class="muted">(what-if)</span>` : ""}<br>
-        <span class="small muted">${esc(when(a.ts))} · <span class="mono">${esc(a.entry_hash.slice(0,12))}…</span></span></span>
-        <span class="small"><span class="c-fail">${a.counts.fail||0} fail</span> · <span class="c-pass">${a.counts.pass||0} pass</span></span></div>`).join("")}
-      <div class="small muted" style="margin-top:8px">Each entry stores the SHA-256 of the design file and of the rule pack, and is chained to the one before, so a changed or deleted entry is detected.</div>
+    <div class="card"><h2>Which rules are broken most</h2>${bars()}</div>
+    <div class="card"><h2>Check history</h2>
+      <div class="chain ${c.ok ? "ok" : "bad"}"><b>${c.ok ? "✓ Nothing has been changed" : "✗ The history has been changed"}</b>
+        <span class="small">${c.ok ? `all ${c.entries} saved records are intact` : "at record #" + c.first_broken_seq}</span></div>
+      ${S.activity.slice(0,6).map(a => `<div class="act" style="grid-template-columns:1fr auto"><span><b>${esc(a.actor)}</b> checked ${esc(a.file)}<br><span class="small muted">${esc(when(a.ts))}</span></span>
+        <span class="small c-fail">${a.counts.fail||0} problems</span></div>`).join("")}
+      <div style="display:flex;gap:8px;margin-top:10px"><button id="verify">Check the history is intact</button><button id="dl">Download for class</button></div>
+      <details class="small muted" style="margin-top:8px"><summary>How this works</summary>Every check is saved with a fingerprint (SHA-256) of the design file and of the rules used, and each record is linked to the one before. If anyone edits or deletes a record, the check above turns red.</details>
     </div>
   </div>`;
-  $("#verify").onclick = async () => { try { const r = await api("/ruletrace/audit"); toast(r.chain.ok ? `Record intact: ${r.chain.entries} entries` : `Record changed at entry #${r.chain.first_broken_seq}`, !r.chain.ok); load(); } catch(e){ toast(e.message, true) } };
+  document.querySelectorAll("[data-x]").forEach(e => e.onclick = ev => { ev.preventDefault(); const r = $("#x" + e.dataset.x), on = r.style.display === "none";
+    r.style.display = on ? "" : "none"; e.textContent = on ? "Hide problems" : "Show problems"; });
+  $("#verify").onclick = async () => { try { const r = await api("/ruletrace/audit"); toast(r.chain.ok ? `Intact: all ${r.chain.entries} records unchanged` : `Changed at record #${r.chain.first_broken_seq}`, !r.chain.ok); load(); } catch(e){ toast(e.message, true) } };
   $("#dl").onclick = async () => { try {
     const r = await api("/ruletrace/audit"), a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], {type:"application/json"}));
-    a.download = `ruletrace-audit-${new Date().toISOString().slice(0,10)}.json`; a.click(); } catch(e){ toast(e.message, true) } };
+    a.download = `ruletrace-check-history-${new Date().toISOString().slice(0,10)}.json`; a.click(); } catch(e){ toast(e.message, true) } };
   document.querySelectorAll("[data-rm]").forEach(e => e.onclick = async ev => { ev.preventDefault();
-    if (!confirm("Remove this design from RuleTrace? Its past checks stay in the audit record.")) return;
+    if (!confirm("Remove this design? Its past checks stay in the history.")) return;
     try { await api(`/ruletrace/designs/${e.dataset.rm}`, {method:"DELETE"}); toast("Design removed"); load(); } catch(err){ toast(err.message, true) } });
 }
 function bars(){
-  if (!S.regimes.length) return `<div class="muted">No open non-compliances.</div>`;
+  if (!S.regimes.length) return `<div class="muted">No rule is broken.</div>`;
   const max = Math.max(...S.regimes.map(g => g.fail));
-  return S.regimes.map(g => `<div class="bar"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>
-    <div class="small muted" style="margin:-3px 0 6px 178px">${g.rules.map(r => esc(r.title)).join(" · ")}</div>`).join("");
+  return S.regimes.map(g => `<div class="bar" title="${esc(g.rules.map(r => r.title).join(" · "))}"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>`).join("");
 }
-
 // ---------------- executive view ----------------
 function money(n){ return new Intl.NumberFormat(undefined, {style:"currency", currency: V.currency || "EUR", maximumFractionDigits:0}).format(n); }
 function executiveView(){
@@ -154,9 +148,9 @@ function executiveView(){
   $("#main").innerHTML = `
   <div class="hero">${t.designs} ship design${t.designs===1?"":"s"} checked. <span>${t.open_fail} compliance issue${t.open_fail===1?"":"s"}</span> found at design stage, before any steel is cut.</div>
   <div class="grid g3">
-    <div class="card"><h2>Rework cost avoided</h2><div class="big" id="avoid"></div><div class="small muted" id="avoidTxt"></div></div>
+    <div class="card"><h2>Money saved by finding issues early</h2><div class="big" id="avoid"></div><div class="small muted" id="avoidTxt"></div></div>
     <div class="card"><h2>Engineer time saved</h2><div class="big" id="hours"></div><div class="small muted" id="hoursTxt"></div></div>
-    <div class="card"><h2>Designs ready</h2><div class="big">${ready} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
+    <div class="card"><h2>Designs ready to go</h2><div class="big">${ready} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
       <div class="small muted">${t.designs - ready} need${t.designs - ready === 1 ? "s" : ""} design changes or more information first.</div></div>
   </div>
   <div class="grid g2">
@@ -164,7 +158,7 @@ function executiveView(){
       <span class="small">${d.counts.fail ? `${d.counts.fail} to fix` : ""}</span><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></div>`).join("")}</div>
     <div class="card"><h2>Where the issues are</h2>${S.regimes.length ? S.regimes.map(g => `<div class="ship"><b style="font-weight:500">${esc(plain(g.regime))}</b><span class="c-fail">${g.fail}</span></div>`).join("") : `<div class="muted">No open issues.</div>`}</div>
   </div>
-  <div class="card assume"><h2>Assumptions (estimate only: change them to see the effect)</h2>
+  <details class="card assume"><summary><b>How these money figures are estimated</b> <span class="small muted">(example numbers: change them to see the effect)</span></summary><div style="margin-top:10px">
     <div class="grid g2"><div>
       <label>Fix a major issue at design stage <input data-k="fix_cost_now.major" type="number" min="0"></label>
       <label>Fix a major issue ${esc(V.late_label)} <input data-k="fix_cost_late.major" type="number" min="0"></label>
@@ -175,7 +169,7 @@ function executiveView(){
       <label>Minutes to check one rule on one part by hand <input data-k="manual_minutes_per_check" type="number" min="0"></label>
       <div class="small muted" style="margin-top:8px">Placeholder figures for the demo, not the yard's own numbers. Defaults are in <span class="mono">ruletrace/value.yaml</span>.</div>
     </div></div>
-  </div>`;
+  </div></details>`;
   const get = k => k.split(".").reduce((o, p) => (o || {})[p], V), set = (k, v) => { const [a, b] = k.split("."); if (b) V[a] = {...(V[a] || {}), [b]: v}; else V[a] = v; };
   document.querySelectorAll("[data-k]").forEach(i => { i.value = get(i.dataset.k); i.oninput = () => { set(i.dataset.k, +i.value || 0); figures(); }; });
   figures();

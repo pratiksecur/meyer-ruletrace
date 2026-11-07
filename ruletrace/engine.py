@@ -235,6 +235,21 @@ def _value(rule: Rule, el: Element | None, ctx: _Ctx) -> tuple[str | None, str]:
     return (None if v is None else str(v)), "from the design data"
 
 
+_OP_WORDS = [(">=", "at least"), ("<=", "at most"), (">", "more than"), ("<", "less than"), ("==", "exactly")]
+
+
+def _plain(required: str, actual, ok: bool) -> str:
+    """'>= 12 m' and '11 m' -> 'The design has 11 m; the rule needs at least 12 m.'"""
+    req = str(required).strip()
+    for op, words in _OP_WORDS:
+        if req.startswith(op):
+            need = f"{words} {req[len(op):].strip()}"
+            break
+    else:
+        need = req
+    return f"The design has {actual}; the rule needs {need}." + ("" if ok else " Not met.")
+
+
 def check_rule(rule: Rule, design: Design) -> list[dict]:
     findings = []
     for el in _targets(rule, design):
@@ -261,24 +276,24 @@ def check_rule(rule: Rule, design: Design) -> list[dict]:
                 if have not in FIRE_CLASS_ORDER:
                     raise QuantityError(f"unknown fire class '{actual}'")
                 ok = FIRE_CLASS_ORDER.index(have) >= FIRE_CLASS_ORDER.index(need)
-                required, msg = f"{need} or better", f"{have} {'meets' if ok else 'is below'} the required {need}"
+                required, msg = f"{need} or better", f"The design has {have}; the rule needs {need} or better." + ("" if ok else " Not met.")
             elif "slope_max" in c:
                 ok = _slope(actual) <= _slope(c["slope_max"]) + 1e-12
                 required = f"not steeper than {c['slope_max']}"
-                msg = f"slope {actual} is {'within' if ok else 'steeper than'} the allowed {c['slope_max']}"
+                msg = f"The slope is {actual}; the rule allows {c['slope_max']} at the steepest." + ("" if ok else " Too steep.")
             elif "equals_expr" in c:
                 want = ctx.fill(c["equals_expr"])
                 ok = str(actual).strip() == want.strip()
-                required, msg = want, f"the drawing gives {actual}, it states {want}"
+                required, msg = want, f"The plans show {actual}, but the drawing's own text states {want}."
             elif "equals" in c:
                 ok = str(actual).lower() == str(c["equals"]).lower()
-                required, msg = str(c["equals"]), f"design says '{actual}', required '{c['equals']}'"
+                required, msg = str(c["equals"]), f"The design has '{actual}'; the rule needs '{c['equals']}'."
             else:
                 required = ctx.fill(c["requirement_expr"]) if "requirement_expr" in c else c["requirement"]
                 res = check_requirement(required, actual)
                 if res.ok is None:
                     raise QuantityError(res.message)
-                ok, msg = res.ok, res.message
+                ok, msg = res.ok, _plain(required, actual, res.ok)
         except (QuantityError, LookupError) as exc:
             findings.append({**base, "status": "unknown", "required": c.get("requirement", ""), "actual": None,
                              "measured": "", "message": f"Can't check: {exc}", "fix": ""})

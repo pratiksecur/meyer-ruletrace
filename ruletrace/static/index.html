@@ -24,6 +24,9 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button
 #view{position:relative;min-height:0;min-width:0;overflow:hidden;background:#e9eef2}
 #view canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}
 @media(min-width:1101px){html,body{overflow:hidden}}aside{min-height:0}
+#start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:3;background:#e9eef2d9}
+#start .box{background:#fff;border-radius:12px;padding:22px 26px;max-width:460px;box-shadow:0 6px 24px #0b254522}
+#start ol{padding-left:20px;margin:10px 0 16px}#start li{margin:6px 0}
 #legend{position:absolute;left:10px;bottom:10px;background:#ffffffe6;border-radius:8px;padding:6px 10px;font-size:12px;display:flex;gap:10px}
 #hover{position:absolute;pointer-events:none;background:#16202aee;color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;display:none}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
@@ -56,8 +59,8 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
   <aside>
     <h2>Design</h2>
     <div id="designs" class="list small"></div>
-    <details><summary>Load a sample</summary><div id="samples" class="list small"></div></details>
-    <h2>Upload a model</h2>
+    <details open><summary>Load a sample</summary><div id="samples" class="list small"></div></details>
+    <h2>Or upload your own</h2>
     <input type="file" id="file" accept=".ifc,.pdf,.json" aria-label="Design file (.ifc, .pdf or .json)" style="width:100%">
     <div class="small muted" style="margin:4px 0 6px">IFC 3D model, GA drawing (vector PDF) or RuleTrace JSON</div>
     <button id="up" class="primary" style="width:100%">Upload and check</button>
@@ -71,6 +74,11 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
     <button id="recheck" style="width:100%">Re-check with these settings</button>
   </aside>
   <main id="view"><div id="hover"></div>
+    <div id="start"><div class="box"><b style="font-size:18px">How RuleTrace works</b>
+      <ol><li><b>Load a ship design</b>: a GA drawing (PDF), an IFC 3D model, or one of our samples.</li>
+        <li><b>See the problems on the model</b>: parts that break a rule turn <b style="color:var(--fail)">red</b>.</li>
+        <li><b>Click a problem</b> to see the rule, what was required, what the design has, and how to fix it.</li></ol>
+      <button class="primary" id="tryDemo" style="width:100%;padding:9px">Try it: check the demo cruise ship</button></div></div>
     <div id="legend"><span><span class="dot" style="background:var(--fail)"></span>fails</span><span><span class="dot" style="background:var(--warn)"></span>warning</span>
       <span><span class="dot" style="background:var(--unknown)"></span>can't check</span><span><span class="dot" style="background:var(--pass)"></span>passes</span>
       <span><span class="dot" style="background:#c4ccd4"></span>not checked</span></div></main>
@@ -260,7 +268,8 @@ async function open(id, overrides){
   document.querySelectorAll("#areas input").forEach(i => i.checked = (s.operating_areas || []).includes(i.value));
   $("#keel").value = s.keel_laid || "";
   buildScene(); renderFindings();
-  $("#meta").innerHTML = `Rule pack ${esc(result.rules_sha256.slice(0,12))}… · design ${esc(result.design_sha256.slice(0,12))}… · recorded as audit entry #${result.audit_seq}`
+  $("#start").style.display = "none";
+  $("#meta").innerHTML = `<span title="design ${esc(result.design_sha256)} · rule pack ${esc(result.rules_sha256)}">Saved in the check history as #${result.audit_seq}</span>`
     + (Object.keys(result.what_if||{}).length ? `<br>What-if: ${esc(JSON.stringify(result.what_if))}` : "");
 }
 function renderFindings(){
@@ -307,6 +316,8 @@ $("#up").onclick = guard(async () => {
   const d = await api("/ruletrace/designs", {method:"POST", body: fd});
   $("#file").value = ""; toast(`${d.filename}: ${d.elements} elements read`); await boot(); await open(d.id);
 });
+$("#tryDemo").onclick = guard(async () => {
+  const d = await api("/ruletrace/designs/sample/demo_cruise_deck7", {method:"POST"}); await boot(); await open(d.id); });
 guard(boot)();
 </script>
 </body>
