@@ -150,3 +150,28 @@ def test_browse_search_and_clause_navigation(indexed):
     assert [x["clause_id"] for x in c["children"]] == ["190.10-25(a)", "190.10-25(b)", "190.10-25(c)"]
     b = indexed.get("/ruletrace/copilot/clause/46CFR190::190.10-25(b)", headers=ENG).json()
     assert b["parent"]["clause_id"] == "190.10-25" and "28 inches" in b["text"]
+
+
+def test_check_file_pdf_measures_stairs_without_gemini(indexed, monkeypatch):
+    """A drawing page without a Gemini key: the stair angles are still measured from the vector lines."""
+    import rulemate.design.measure as measure
+    import rulemate.design.extract as extract
+    from rulemate.design.measure import Flight
+    from pathlib import Path
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(extract, "ocr_page", lambda path, page, dpi=200: [])
+    monkeypatch.setattr(measure, "stair_flights", lambda path, page, words: [
+        Flight(angle=52.0, bbox=(1, 1, 2, 2), stringers=2, label="STAIRWAY", room_no="1-25-0", raw_angles=(52.0, 52.0))])
+    pdf = Path(__file__).parents[1] / "ruletrace" / "samples" / "demo_ga_drawing.pdf"
+    r = indexed.post("/ruletrace/copilot/check/file", headers=ENG, data={"page": "1", "docs": "46CFR190"},
+                     files={"file": ("ga.pdf", pdf.read_bytes(), "application/pdf")}).json()
+    assert r["kind"] == "pdf" and r["counts"]["FAIL"] == 1  # 52 degrees > 50 (46 CFR 190.10-25(b))
+    assert "no Gemini key" in " ".join(r["notes"])
+
+
+def test_check_file_csv(indexed):
+    csv = indexed.get("/ruletrace/copilot/example.csv", headers=ENG).text
+    r = indexed.post("/ruletrace/copilot/check/file", headers=ENG, data={"docs": "36CFR1191AppD"},
+                     files={"file": ("example.csv", csv.encode(), "text/csv")}).json()
+    assert r["kind"] == "csv" and r["counts"]["FAIL"] == 4

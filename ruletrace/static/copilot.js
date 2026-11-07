@@ -43,9 +43,12 @@ document.body.insertAdjacentHTML("beforeend", `
       <div class="small muted">Design values against limits taken from the full regulation texts. Units are converted
         in code (mm, in, ft, 2'-6"); PASS / FAIL / NEEDS REVIEW is computed, never written by a model.</div>
       <div class="docs" id="cpCheckDocs"></div>
-      <div class="row"><input type="file" id="cpCsv" accept=".csv" style="flex:1">
+      <div class="row"><input type="file" id="cpCsv" accept=".csv,.png,.jpg,.jpeg,.webp,.pdf" style="flex:1">
         <button id="cpExample" title="Accessible stateroom, synthetic values with planted defects">Example</button></div>
-      <div class="small muted">CSV columns: item_id, space, parameter, value, unit, source</div>
+      <div class="row" id="cpCPageRow" hidden><label class="small">PDF page</label><input type="number" id="cpCPage" min="1" value="1"></div>
+      <div class="small muted">A <b>CSV</b> (item_id, space, parameter, value, unit, source), a <b>picture</b> or a
+        <b>drawing page</b> (PDF): Gemini reads the written dimensions, code confirms each one on the page and measures
+        stair angles from the PDF's lines; then every value is checked.</div>
       <div class="ship" style="margin-top:10px"><input id="cpVSpace" placeholder="Space (e.g. Accessible cabin bathroom)">
         <input id="cpVParam" placeholder="Parameter (e.g. door clear width)">
         <input id="cpVValue" placeholder="Value (30, 2'-6&quot;, 1500)"><input id="cpVUnit" placeholder="Unit (in, mm)"></div>
@@ -236,7 +239,10 @@ async function runCheck(csvFile) {
   try {
     let r;
     if (csvFile) { const fd = new FormData(); fd.append("file", csvFile); fd.append("docs", checkDocs().join(","));
-      r = await call("/ruletrace/copilot/check/csv", {method: "POST", body: fd}); }
+      fd.append("page", $c("#cpCPage").value || "1");
+      $c("#cpCheckOut").innerHTML = `<div class="ans muted">${/\.csv$/i.test(csvFile.name) ? "Checking…"
+        : "Reading the values (Gemini, then confirmed by OCR) and checking… up to a minute"}</div>`;
+      r = await call("/ruletrace/copilot/check/file", {method: "POST", body: fd}); }
     else { if (!vrows.length) throw new Error("Add a value or choose a CSV first");
       r = await call("/ruletrace/copilot/check", {method: "POST", body: {rows: vrows, docs: checkDocs()}}); }
     lastCheck = r; showCheck(r);
@@ -244,6 +250,7 @@ async function runCheck(csvFile) {
   finally { $c("#cpRunCheck").disabled = false; }
 }
 $c("#cpRunCheck").onclick = () => runCheck($c("#cpCsv").files[0]);
+$c("#cpCsv").onchange = () => { const f = $c("#cpCsv").files[0]; $c("#cpCPageRow").hidden = !(f && /\.pdf$/i.test(f.name)); };
 $c("#cpExample").onclick = async () => {
   const r = await fetch("/ruletrace/copilot/example.csv", {headers: RT().headers()});
   if (!r.ok) return toast("Build the index first", true);
@@ -254,7 +261,10 @@ function showCheck(r) {
       <div><b style="color:var(--warn)">${r.counts["NEEDS REVIEW"]}</b>needs review</div><div><b style="color:var(--pass)">${r.counts.PASS}</b>pass</div></div>
     ${r.results.map((x, i) => `<div class="item" data-ci="${i}"><div class="h"><span class="t">${esc(x.parameter)}: ${esc(x.value)}</span>${pill(x.verdict)}</div>
       <div class="small muted">${esc(x.item_id)} · ${esc(x.space)}${x.deciding ? ` · ${esc(x.deciding.limit)} <span class="cite" data-uid="${esc(x.deciding.uid)}">${esc(x.deciding.clause)}</span>` : " · no matching limit"}</div>
-      <div class="more" hidden><pre>${esc(x.reason)}</pre></div><div class="cl"></div></div>`).join("")}
+      <div class="more" hidden>${x.crop ? `<img src="${x.crop}" alt="">` : ""}<pre>${esc(x.reason)}</pre>
+        ${x.source ? `<div class="small muted">From: ${esc(x.source)}</div>` : ""}</div><div class="cl"></div></div>`).join("")}
+    ${(r.unconfirmed || []).length ? `<div class="small muted" style="margin-top:8px">Read by Gemini but not found on the page, so not checked: ${r.unconfirmed.map(u => esc(`${u.parameter} ${u.written}`)).join("; ")}</div>` : ""}
+    ${(r.notes || []).length ? `<div class="small muted">${r.notes.map(esc).join(" · ")}</div>` : ""}
     <button class="aib" id="cpDl">Download results (CSV)</button>
     <div class="how">Limits come from the clause text; values are converted with pint and compared in code. NEEDS REVIEW when a limit has a condition code cannot confirm.</div>`;
   document.querySelectorAll("#cpCheckOut .item").forEach(el => el.onclick = e => {

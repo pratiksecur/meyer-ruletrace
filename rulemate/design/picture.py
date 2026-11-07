@@ -48,13 +48,14 @@ class PictureValue:
     notes: list[str] = field(default_factory=list)
 
 
-def normalize_image(data: bytes) -> tuple[bytes, "object"]:
-    """Any uploaded image -> PNG bytes (longest side at most MAX_SIDE) and the PIL image."""
+def normalize_image(data: bytes, max_side: int = MAX_SIDE) -> tuple[bytes, "object"]:
+    """Any uploaded image -> PNG bytes (longest side at most max_side) and the PIL image."""
     from PIL import Image
 
+    Image.MAX_IMAGE_PIXELS = 200_000_000  # large drawing sheets are legitimate input
     img = Image.open(io.BytesIO(data)).convert("RGB")
-    if max(img.size) > MAX_SIDE:
-        img.thumbnail((MAX_SIDE, MAX_SIDE))
+    if max(img.size) > max_side:
+        img.thumbnail((max_side, max_side))
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue(), img
@@ -64,13 +65,26 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
 
-def read_picture(data: bytes, llm, words: list | None = None) -> tuple[list[PictureValue], bytes]:
+def pdf_page_png(path, page_no: int, max_side: int = 3600) -> bytes:
+    """A drawing page rendered as a picture (longest side at most max_side)."""
+    import pdfplumber
+
+    with pdfplumber.open(path) as pdf:
+        pg = pdf.pages[page_no - 1]
+        dpi = max(50, min(200, int(max_side * 72 / max(float(pg.width), float(pg.height)))))
+        img = pg.to_image(resolution=dpi).original.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def read_picture(data: bytes, llm, words: list | None = None, max_side: int = MAX_SIDE) -> tuple[list[PictureValue], bytes]:
     """Gemini reads the values; local OCR confirms each one at the position Gemini gives."""
     import numpy as np
 
     from .extract import _engine
 
-    png, img = normalize_image(data)
+    png, img = normalize_image(data, max_side)
     W, H = img.size
     if words is None:
         res = _engine()(np.array(img))

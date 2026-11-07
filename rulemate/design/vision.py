@@ -57,6 +57,7 @@ def render_png(path: Path, page_no: int, dpi: int = 150) -> tuple[bytes, float, 
 
     with pdfplumber.open(path) as pdf:
         pg = pdf.pages[page_no - 1]
+        dpi = max(50, min(dpi, int(5000 * 72 / max(float(pg.width), float(pg.height)))))  # large sheets: cap size
         img = pg.to_image(resolution=dpi).original.convert("RGB")
         w, h = float(pg.width), float(pg.height)
     buf = io.BytesIO()

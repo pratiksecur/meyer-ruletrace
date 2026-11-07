@@ -12,6 +12,8 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
     POST /ruletrace/copilot/check           design values (space, parameter, value, unit) -> PASS / FAIL / NEEDS
                                             REVIEW against limits taken from the full texts; computed in code
     POST /ruletrace/copilot/check/csv       the same from a CSV upload;  GET /ruletrace/copilot/example.csv
+    POST /ruletrace/copilot/check/file      CSV, picture or drawing page (PDF): values read (Gemini, confirmed by
+                                            OCR; stair angles from the PDF's vector lines), then checked
     POST /ruletrace/copilot/read            a picture (png/jpg) or a drawing page (pdf, also scanned): Gemini reads
                                             it, code confirms every reading on the image; picture values are
                                             checked against the full texts
@@ -288,6 +290,43 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             raise HTTPException(400, str(exc)) from exc
         out = _check(rows, [d for d in docs.split(",") if d])
         _audit(who, "copilot.checked", {"file": Path(file.filename or "").name, "rows": len(rows), "counts": out["counts"]})
+        return out
+
+    @router.post("/copilot/check/file")
+    async def check_file(file: UploadFile = File(...), page: int = Form(default=1), docs: str = Form(default=""),
+                         who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from PIL import Image
+        from rulemate.design.values import values_from_file
+
+        data = await file.read()
+        if len(data) > app.state.settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, "file too large")
+        name = Path(file.filename or "upload").name
+        needs_gemini = not name.lower().endswith(".csv")
+        llm = vision_llm() if needs_gemini and os.getenv("GEMINI_API_KEY") else None
+        if needs_gemini and llm is None and not name.lower().endswith(".pdf"):
+            raise HTTPException(503, "set GEMINI_API_KEY in .env to read values from pictures")
+        try:
+            fv = values_from_file(data, name, llm=llm, page=page)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:  # Gemini quota, unreadable file
+            raise HTTPException(502, f"could not read {name}: {str(exc)[:200]}") from exc
+        out = _check(fv.rows, [d for d in docs.split(",") if d]) if fv.rows else {
+            "counts": {"PASS": 0, "FAIL": 0, "NEEDS REVIEW": 0}, "results": [], "docs": docs or "all"}
+        out.update(kind=fv.kind, notes=fv.notes, file=name)
+        if fv.png:
+            img = Image.open(io.BytesIO(fv.png)).convert("RGB")
+            # to_rows numbers the confirmed readings P01, P02, ... in order
+            crops = {f"P{i:02d}": _crop_url(img, v.bbox_px)
+                     for i, v in enumerate([v for v in fv.readings if v.confirmed], start=1)}
+            for x in out["results"]:
+                x["crop"] = crops.get(x["item_id"])
+            out["unconfirmed"] = [{"space": v.space, "parameter": v.parameter, "written": v.value_text}
+                                  for v in fv.readings if not v.confirmed]
+        _audit(who, "copilot.checked", {"file": name, "kind": fv.kind, "sha256": hashlib.sha256(data).hexdigest(),
+                                        "rows": len(fv.rows), "counts": out["counts"]})
         return out
 
     @router.get("/copilot/example.csv", response_class=PlainTextResponse)
