@@ -102,6 +102,21 @@ def _crop_url(img, box, margin=140) -> str:
     return _png_url(buf.getvalue())
 
 
+def deciding(res) -> dict | None:
+    """The limit that decided a verdict: the failed one, else the closest one."""
+    ap = res.applied
+    if not ap:
+        return None
+    failed = [x for x in ap if x.outcome == "fail" and x.role == "applied"]
+
+    def margin(x):
+        v = x.value_in_limit_unit
+        return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
+
+    d = failed[0] if failed else min(ap, key=margin)
+    return {"limit": d.limit.describe(), "uid": d.limit.clause_uid, "clause": f"{d.limit.doc} § {d.limit.clause_id}"}
+
+
 def design_from_rooms(rooms: list[dict], page_w: float, page_h: float, ship: dict, filename: str, page: int) -> dict:
     """Confirmed Gemini readings of a GA sheet -> RuleTrace design JSON. Cabins carry berths only when the drawing
     states them (printed count, SINGLE/DOUBLE); positions come from the label position on the sheet, scaled to the
@@ -248,19 +263,16 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         results = check_rows(rows, docs=docs or None)
         out = []
         for res in results:
-            ap = res.applied
-            failed = [x for x in ap if x.outcome == "fail" and x.role == "applied"]
-            def margin(x):
-                v = x.value_in_limit_unit
-                return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
-            dec = failed[0] if failed else (min(ap, key=margin) if ap else None)
+            dec = deciding(res)
             out.append({"item_id": res.row.item_id, "space": res.row.space, "parameter": res.row.parameter,
                         "value": res.row.display, "verdict": res.shown_verdict, "reason": res.reason,
-                        "deciding": ({"limit": dec.limit.describe(), "uid": dec.limit.clause_uid,
-                                      "clause": f"{dec.limit.doc} § {dec.limit.clause_id}"} if dec else None),
+                        "deciding": dec,
                         "source": res.row.source})
         counts = {v: sum(x["verdict"] == v for x in out) for v in ("PASS", "FAIL", "NEEDS REVIEW", "NO RULE", "CHECK INPUT")}
-        return {"counts": counts, "results": out, "docs": docs or "all"}
+        from rulemate.design.summary import summarize_check
+
+        return {"counts": counts, "results": out, "docs": docs or "all",
+                "in_short": summarize_check(out, docs or ["the loaded rule texts"])}
 
     @router.post("/copilot/check")
     def check_values(body: CheckIn, who: Principal = Depends(engineer)) -> dict:
@@ -312,10 +324,12 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             raise HTTPException(503, "set GEMINI_API_KEY in .env to read values from pictures")
         try:
             fv = values_from_file(data, name, llm=llm, page=page)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        except Exception as exc:  # Gemini quota, unreadable file
-            raise HTTPException(502, f"could not read {name}: {str(exc)[:200]}") from exc
+        except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words
+            from rulemate.design.summary import _explain_error
+
+            return {"kind": "error", "file": name, "counts": {}, "results": [], "docs": docs,
+                    "in_short": {"headline": f"Nothing could be read from {name}.", "points": [_explain_error(str(exc))],
+                                 "next": ["Nothing was checked. Try again later, another page, or a CSV."]}}
         out = _check(fv.rows, [d for d in docs.split(",") if d]) if fv.rows else {
             "counts": {"PASS": 0, "FAIL": 0, "NEEDS REVIEW": 0, "NO RULE": 0, "CHECK INPUT": 0}, "results": [],
             "docs": docs or "all"}
@@ -356,10 +370,12 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                 out = _read_picture(data, name, llm, [d for d in docs.split(",") if d] or DEFAULT_DOCS)
             else:
                 raise HTTPException(400, "upload a picture (.png, .jpg) or a drawing (.pdf)")
-        except HTTPException:
-            raise
-        except Exception as exc:  # Gemini quota, unreadable file
-            raise HTTPException(502, f"could not read {name}: {str(exc)[:200]}") from exc
+        except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words
+            from rulemate.design.summary import summarize_drawing
+
+            msg = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            return {"kind": "error", "file": name, "items": [], "n_readings": 0, "n_confirmed": 0,
+                    "in_short": summarize_drawing([], {}, error=str(msg))}
         _audit(who, "copilot.read", {"file": name, "sha256": sha, "kind": out["kind"], "model": llm.model,
                                      "readings": out["n_readings"], "confirmed": out["n_confirmed"]})
         return out
@@ -387,8 +403,13 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         small.thumbnail((900, 900))
         buf = io.BytesIO()
         small.save(buf, format="PNG")
+        from rulemate.design.summary import summarize_check
+
+        checked = [{"verdict": r.shown_verdict, "parameter": r.row.parameter, "value": r.row.display,
+                    "deciding": deciding(r)} for r in results]
         return {"kind": "picture", "file": name, "preview": _png_url(buf.getvalue()), "items": items,
-                "n_readings": len(values), "n_confirmed": sum(v.confirmed for v in values), "docs": docs}
+                "n_readings": len(values), "n_confirmed": sum(v.confirmed for v in values), "docs": docs,
+                "in_short": summarize_check(checked, docs)}
 
     def _read_drawing(data: bytes, name: str, page: int, llm) -> dict:
         import json
@@ -406,6 +427,9 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                 raise HTTPException(400, f"page must be between 1 and {n}")
             words = ocr_page(pdf, page, 300)
             rooms = read_sheet(pdf, page, llm, words)
+            from rulemate.design.summary import drawing_facts, summarize_drawing
+
+            facts = drawing_facts(words)
             png, w, h = render_png(pdf, page, 110)
         rid = hashlib.sha256(data + str(page).encode()).hexdigest()[:16]
         rows = [r.__dict__ for r in rooms]
@@ -416,6 +440,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         return {"kind": "drawing", "file": name, "page": page, "pages": n, "readings_id": rid,
                 "preview": _png_url(png), "items": rows, "n_readings": len(rows),
                 "n_confirmed": sum(r["confirmed"] for r in rows),
+                "in_short": summarize_drawing(rows, facts),
                 "summary": {"cabins": len(cabins),
                             "berths_confirmed": sum(r["berths"] or 0 for r in cabins if r["berths_confirmed"]),
                             "hospital": any(r["confirmed"] and r["kind"] == "hospital" for r in rows)}}
