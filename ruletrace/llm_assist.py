@@ -5,7 +5,8 @@ The model only does three jobs where wording matters, and each one is fenced in:
 
   1. explain_findings  - turn an engine finding into four short parts (requirement, what the design has,
                          why it matters, fix). Each part is checked against the finding: numbers must
-                         come from it, and the required and actual values must be stated. If a check
+                         come from it, and the required and actual values must be stated. The paragraph citation is added by
+                         code so it is always exact. If a check
                          fails, the deterministic explanation is used instead.
   2. draft_rule        - turn pasted regulation text into a DRAFT rule (YAML). The quote must be a
                          verbatim part of the pasted text, the structure is validated, and the rule
@@ -124,7 +125,7 @@ EVIDENCE RULES (strict)
 2. Do not introduce any number, unit, regulation, paragraph, ship type or requirement that is not in the
    block. Do not calculate (no differences, percentages, conversions). Copy numbers exactly as written,
    with their units.
-3. Name the regulation and paragraph with 'regime' and 'ref' exactly as given.
+3. Start "requirement" with the regulation and paragraph, copying 'regime' and 'ref' exactly as given.
 4. If a field is null or empty, say the design does not give it. Never guess.
 5. If 'verified' is false, say the rule text still has to be checked against the official edition.
 6. Never say the ship is safe, approved or will pass. Never give legal advice.
@@ -174,8 +175,6 @@ def _check_parts(parts: dict, f: dict, source: str) -> None:
         raise LLMError("answer does not state the required value")
     if f.get("actual") is not None and not numbers_in(str(f["actual"])) <= numbers_in(parts["design_state"]):
         raise LLMError("answer does not state the actual value")
-    if f.get("ref") and _norm(str(f["ref"])) not in _norm(parts["requirement"]):
-        raise LLMError("answer does not name the paragraph")
     low = joined.lower()
     if any(w in low for w in ("is safe", "will pass", "is approved", "fully compliant", "no issue")):
         raise LLMError("answer made a compliance claim")
@@ -191,6 +190,10 @@ def explain_findings(client, findings: list[dict], limit: int = 8) -> list[dict]
         try:
             parts = parse_json_object(client.complete(SYSTEM_EXPLAIN, f"<finding>{source}</finding>", json_mode=True))
             parts = {k: parts.get(k) for k in _PARTS}
+            if isinstance(parts["requirement"], str) and f.get("ref") and \
+                    _norm(str(f["ref"])) not in _norm(parts["requirement"]):
+                # The citation is added by code, so it is always exact and never depends on the model.
+                parts["requirement"] = f"[{f.get('regime', '')}, {f['ref']}] {parts['requirement']}"
             _check_parts(parts, f, source)
             out.append({**item, "parts": parts, "explanation": " ".join(v for v in parts.values() if v),
                         "source": client.name})

@@ -37,10 +37,17 @@ def test_explain_accepts_faithful_four_part_answer():
     assert out[0]["source"] == "fake:test" and out[0]["parts"]["design_state"].endswith("850 mm.")
 
 
+def test_citation_is_added_by_code_when_model_omits_it():
+    out = la.explain_findings(Fake(good_parts(requirement="The rule requires at least 900 mm.")), [FINDING])
+    assert out[0]["source"] == "fake:test"
+    assert out[0]["parts"]["requirement"].startswith("[SOLAS / FSS Code, FSS Code ch. 13, 2.1.1] ")
+    again = la.explain_findings(Fake(good_parts()), [FINDING])
+    assert again[0]["parts"]["requirement"].count("2.1.1") == 1     # not duplicated when the model has it
+
+
 def test_explain_rejects_invented_numbers_missing_values_and_claims():
     for bad in (good_parts(fix="Widen it by 50 mm to 950 mm."),            # invented numbers
                 good_parts(design_state="Stairway 3B is too narrow."),    # actual value missing
-                good_parts(requirement="The rule requires 900 mm."),      # paragraph not named
                 good_parts(why_it_matters="Then the ship is safe."),      # compliance claim
                 "not json at all", json.dumps({"requirement": "x"})):     # wrong shape
         out = la.explain_findings(Fake(bad), [FINDING])
