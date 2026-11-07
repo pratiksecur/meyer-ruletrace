@@ -1,4 +1,10 @@
+import os
+
 import pytest
+
+os.environ.setdefault("COPILOT_FETCH_MLC", "0")  # tests never download the ILO text
+# most Copilot tests use fake cloud models; confidential mode (the default) is tested explicitly
+os.environ.setdefault("COPILOT_CONFIDENTIAL", "0")
 from fastapi.testclient import TestClient
 from vartija_core.settings import Settings
 

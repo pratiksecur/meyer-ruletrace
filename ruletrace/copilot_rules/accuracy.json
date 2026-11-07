@@ -1,0 +1,423 @@
+{
+ "measured": "2026-11-07",
+ "how": "eval/run.py in the RuleMate repo, on three question sets (fresh, held-out, development), designs with known verdicts and planted defects, and two real GA drawings with hand-counted truth.",
+ "groups": [
+  {
+   "name": "Answers from the rule texts (Ask), confidential mode",
+   "model": "qwen3:8b on this computer, fresh questions",
+   "items": [
+    {
+     "metric": "Right clause found (in the top 5)",
+     "value": 0.917,
+     "n": 12
+    },
+    {
+     "metric": "Answers that passed every check (verified)",
+     "value": 0.917,
+     "n": 12,
+     "note": "the rest are shown as clause excerpts, not as an answer"
+    },
+    {
+     "metric": "Citations that really support the sentence",
+     "value": 1.0,
+     "n": 25
+    },
+    {
+     "metric": "Key numbers present in the answer",
+     "value": 0.889,
+     "n": 9
+    },
+    {
+     "metric": "Questions outside the texts correctly answered 'not found'",
+     "value": 1.0,
+     "n": 3
+    },
+    {
+     "metric": "Answerable questions wrongly answered 'not found'",
+     "value": 0.0,
+     "n": 12,
+     "lower_is_better": true
+    }
+   ]
+  },
+  {
+   "name": "Compliance check (Check values)",
+   "model": "no model: computed in code",
+   "items": [
+    {
+     "metric": "Verdicts correct, research vessel (46 CFR 190)",
+     "value": 1.0,
+     "n": 14
+    },
+    {
+     "metric": "Verdicts correct, accessible stateroom (ADA)",
+     "value": 1.0,
+     "n": 9
+    },
+    {
+     "metric": "Verdicts correct, cruise sample (synthetic rules)",
+     "value": 1.0,
+     "n": 15
+    },
+    {
+     "metric": "Planted defects caught",
+     "value": 1.0,
+     "n": 19
+    },
+    {
+     "metric": "Value exactly at the limit wrongly failed",
+     "value": 0.0,
+     "n": 19,
+     "lower_is_better": true
+    }
+   ]
+  },
+  {
+   "name": "Reading drawings (optional Gemini)",
+   "model": "gemini flash (free tier), confirmed by local OCR",
+   "items": [
+    {
+     "metric": "NOAA GA: berth labels found by OCR",
+     "value": 1.0,
+     "n": 34
+    },
+    {
+     "metric": "NOAA GA: room and berth count exact by Gemini",
+     "value": 0.97,
+     "n": 34
+    },
+    {
+     "metric": "NOAA GA: Gemini readings confirmed on the sheet",
+     "value": 1.0,
+     "n": 34
+    },
+    {
+     "metric": "RCRV GA: stair flights measured",
+     "value": 1.0,
+     "n": 3
+    }
+   ]
+  },
+  {
+   "name": "General answers (questions outside the rule texts)",
+   "model": "Groq / Ollama",
+   "items": [
+    {
+     "metric": "Not measured: general knowledge, not checked against any rule text",
+     "value": null,
+     "n": 0
+    }
+   ]
+  }
+ ],
+ "caveats": [
+  "The fresh set is small (12 answerable, 3 unanswerable questions): one question moves a score by about 8 points.",
+  "The questions and example designs were written by the team; the development set was used to tune the checks. Expect lower numbers on new real data.",
+  "Cloud runs of 7 Nov evening hit Groq's free rate limit; the development-set figures for the Groq models come from the clean run at 20:32-20:41.",
+  "Only two real drawings were scored; drawings without printed room names give fewer readings.",
+  "General answers are not checked against any rule text. Treat them as a starting point and confirm in the governing rules.",
+  "Every PASS / FAIL is computed in code from the clause text; a model never decides it."
+ ],
+ "models": [
+  {
+   "id": "groq:openai/gpt-oss-120b",
+   "name": "gpt-oss-120b (Groq, cloud)",
+   "local": false,
+   "headline_set": "fresh",
+   "verified": 0.9166666666666666,
+   "citation_precision": 1.0,
+   "fact_recall": 1.0,
+   "correct_not_found": 1.0,
+   "false_not_found": 0.08333333333333333,
+   "latency_p50_s": 0.6,
+   "sets": [
+    {
+     "id": "groq:openai/gpt-oss-120b",
+     "set": "fresh",
+     "when": "2026-11-07 21:04",
+     "verified": 0.9166666666666666,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.08333333333333333,
+     "latency_p50_s": 0.6,
+     "retrieval_hit5": 0.9166666666666666,
+     "n_answerable": 12,
+     "n_unanswerable": 3,
+     "unavailable": 0
+    },
+    {
+     "id": "groq:openai/gpt-oss-120b",
+     "set": "held-out",
+     "when": "2026-11-07 21:12",
+     "verified": 1.0,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 0.6666666666666666,
+     "false_not_found": 0.0,
+     "latency_p50_s": 0.8,
+     "retrieval_hit5": 0.9285714285714286,
+     "n_answerable": 14,
+     "n_unanswerable": 6,
+     "unavailable": 1
+    },
+    {
+     "id": "groq:openai/gpt-oss-120b",
+     "set": "development",
+     "when": "2026-11-07 20:32",
+     "verified": 0.9736842105263158,
+     "citation_precision": 0.9382716049382716,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 4.5,
+     "retrieval_hit5": 1.0,
+     "n_answerable": 38,
+     "n_unanswerable": 7,
+     "unavailable": 0
+    }
+   ]
+  },
+  {
+   "id": "groq:openai/gpt-oss-20b",
+   "name": "gpt-oss-20b (Groq, cloud)",
+   "local": false,
+   "headline_set": "fresh",
+   "verified": 0.8333333333333334,
+   "citation_precision": 1.0,
+   "fact_recall": 1.0,
+   "correct_not_found": 1.0,
+   "false_not_found": 0.08333333333333333,
+   "latency_p50_s": 1.1,
+   "sets": [
+    {
+     "id": "groq:openai/gpt-oss-20b",
+     "set": "fresh",
+     "when": "2026-11-07 21:06",
+     "verified": 0.8333333333333334,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.08333333333333333,
+     "latency_p50_s": 1.1,
+     "retrieval_hit5": 0.9166666666666666,
+     "n_answerable": 12,
+     "n_unanswerable": 3,
+     "unavailable": 0
+    },
+    {
+     "id": "groq:openai/gpt-oss-20b",
+     "set": "held-out",
+     "when": "2026-11-07 21:14",
+     "verified": 0.9285714285714286,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 5.7,
+     "retrieval_hit5": 0.9285714285714286,
+     "n_answerable": 14,
+     "n_unanswerable": 6,
+     "unavailable": 0
+    },
+    {
+     "id": "groq:openai/gpt-oss-20b",
+     "set": "development",
+     "when": "2026-11-07 20:36",
+     "verified": 0.9473684210526315,
+     "citation_precision": 0.9620253164556962,
+     "fact_recall": 0.9696969696969697,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 4.5,
+     "retrieval_hit5": 1.0,
+     "n_answerable": 38,
+     "n_unanswerable": 7,
+     "unavailable": 0
+    }
+   ]
+  },
+  {
+   "id": "groq:qwen/qwen3.8-27b",
+   "name": "qwen3.8-27b (Groq, cloud)",
+   "local": false,
+   "headline_set": "fresh",
+   "verified": 0.8333333333333334,
+   "citation_precision": 1.0,
+   "fact_recall": 1.0,
+   "correct_not_found": 1.0,
+   "false_not_found": 0.08333333333333333,
+   "latency_p50_s": 8.3,
+   "sets": [
+    {
+     "id": "groq:qwen/qwen3.8-27b",
+     "set": "fresh",
+     "when": "2026-11-07 21:08",
+     "verified": 0.8333333333333334,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.08333333333333333,
+     "latency_p50_s": 8.3,
+     "retrieval_hit5": 0.9166666666666666,
+     "n_answerable": 12,
+     "n_unanswerable": 3,
+     "unavailable": 1
+    },
+    {
+     "id": "groq:qwen/qwen3.8-27b",
+     "set": "held-out",
+     "when": "2026-11-07 21:17",
+     "verified": 0.9285714285714286,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 3.1,
+     "retrieval_hit5": 0.9285714285714286,
+     "n_answerable": 14,
+     "n_unanswerable": 6,
+     "unavailable": 0
+    },
+    {
+     "id": "groq:qwen/qwen3.8-27b",
+     "set": "development",
+     "when": "2026-11-07 20:41",
+     "verified": 1.0,
+     "citation_precision": 0.9625,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 6.3,
+     "retrieval_hit5": 1.0,
+     "n_answerable": 38,
+     "n_unanswerable": 7,
+     "unavailable": 0
+    }
+   ]
+  },
+  {
+   "id": "ollama:qwen3:8b",
+   "name": "qwen3:8b (Ollama, this computer)",
+   "local": true,
+   "headline_set": "fresh",
+   "verified": 0.9166666666666666,
+   "citation_precision": 1.0,
+   "fact_recall": 0.8888888888888888,
+   "correct_not_found": 1.0,
+   "false_not_found": 0.0,
+   "latency_p50_s": 17.5,
+   "sets": [
+    {
+     "id": "ollama:qwen3:8b",
+     "set": "fresh",
+     "when": "2026-11-07 21:50",
+     "verified": 0.9166666666666666,
+     "citation_precision": 1.0,
+     "fact_recall": 0.8888888888888888,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 17.5,
+     "retrieval_hit5": 0.9166666666666666,
+     "n_answerable": 12,
+     "n_unanswerable": 3,
+     "unavailable": 0
+    },
+    {
+     "id": "ollama:qwen3:8b",
+     "set": "held-out",
+     "when": "2026-11-07 22:01",
+     "verified": 0.9285714285714286,
+     "citation_precision": 1.0,
+     "fact_recall": 0.9,
+     "correct_not_found": 0.8333333333333334,
+     "false_not_found": 0.0,
+     "latency_p50_s": 28.3,
+     "retrieval_hit5": 0.9285714285714286,
+     "n_answerable": 14,
+     "n_unanswerable": 6,
+     "unavailable": 0
+    },
+    {
+     "id": "ollama:qwen3:8b",
+     "set": "development",
+     "when": "2026-11-07 22:21",
+     "verified": 0.7894736842105263,
+     "citation_precision": 0.9344262295081968,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 19.3,
+     "retrieval_hit5": 1.0,
+     "n_answerable": 38,
+     "n_unanswerable": 7,
+     "unavailable": 0
+    }
+   ]
+  },
+  {
+   "id": "ollama:llama3.2:3b",
+   "name": "llama3.2:3b (Ollama, this computer)",
+   "local": true,
+   "headline_set": "fresh",
+   "verified": 0.8333333333333334,
+   "citation_precision": 1.0,
+   "fact_recall": 1.0,
+   "correct_not_found": 1.0,
+   "false_not_found": 0.08333333333333333,
+   "latency_p50_s": 6.0,
+   "sets": [
+    {
+     "id": "ollama:llama3.2:3b",
+     "set": "fresh",
+     "when": "2026-11-07 21:10",
+     "verified": 0.8333333333333334,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.08333333333333333,
+     "latency_p50_s": 6.0,
+     "retrieval_hit5": 0.9166666666666666,
+     "n_answerable": 12,
+     "n_unanswerable": 3,
+     "unavailable": 0
+    },
+    {
+     "id": "ollama:llama3.2:3b",
+     "set": "held-out",
+     "when": "2026-11-07 21:20",
+     "verified": 0.42857142857142855,
+     "citation_precision": 1.0,
+     "fact_recall": 1.0,
+     "correct_not_found": 0.8333333333333334,
+     "false_not_found": 0.0,
+     "latency_p50_s": 6.0,
+     "retrieval_hit5": 0.9285714285714286,
+     "n_answerable": 14,
+     "n_unanswerable": 6,
+     "unavailable": 0
+    },
+    {
+     "id": "ollama:llama3.2:3b",
+     "set": "development",
+     "when": "2026-11-07 21:30",
+     "verified": 0.8157894736842105,
+     "citation_precision": 0.9137931034482759,
+     "fact_recall": 0.9333333333333333,
+     "correct_not_found": 1.0,
+     "false_not_found": 0.0,
+     "latency_p50_s": 5.0,
+     "retrieval_hit5": 1.0,
+     "n_answerable": 38,
+     "n_unanswerable": 7,
+     "unavailable": 0
+    }
+   ]
+  }
+ ],
+ "sets": {
+  "fresh": "15 questions written after the last code change; never used for tuning",
+  "held-out": "20 questions; the search fixes of 7 Nov were prompted by misses on this set",
+  "development": "45 questions the checks were developed and tuned on"
+ }
+}

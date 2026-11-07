@@ -1,0 +1,724 @@
+"""RuleMate Copilot inside RuleTrace: ask the full regulations, read drawings and pictures with Gemini.
+
+Added to the RuleTrace router (same login, roles and audit chain). The Copilot never decides compliance on a
+RuleTrace design: findings still come from the rule engine. It adds two things the rule pack cannot do alone:
+
+    GET  /ruletrace/copilot/status          what is installed and ready (index, Gemini key, local model)
+    POST /ruletrace/copilot/index           build the clause index of the full regulation texts (once, ~30 s)
+    POST /ruletrace/copilot/ask             question -> answer citing clauses of the official texts; every
+                                            citation, number and quote checked in code. A question the texts do
+                                            not answer gets a general answer, labelled "not from the loaded rules,
+                                            not verified". The bot uses Groq and Ollama only.
+    POST /ruletrace/copilot/review          an engineer approves or rejects an item that needs a human (NEEDS
+                                            REVIEW verdict, a Gemini reading, a general answer); audit chain
+    GET  /ruletrace/copilot/reviews         the decisions made so far
+    GET  /ruletrace/copilot/accuracy        measured accuracy of each part, with caveats
+    GET  /ruletrace/copilot/clause/{uid}    a clause with its parent, sub-clauses, references and referenced-by
+    GET  /ruletrace/copilot/browse          clauses of a document (outline), or a search over the full texts
+    POST /ruletrace/copilot/check           design values (space, parameter, value, unit) -> PASS / FAIL / NEEDS
+                                            REVIEW against limits taken from the full texts; computed in code
+    POST /ruletrace/copilot/check/csv       the same from a CSV upload;  GET /ruletrace/copilot/example.csv
+    POST /ruletrace/copilot/check/file      CSV, picture or drawing page (PDF): values read (Gemini, confirmed by
+                                            OCR; stair angles from the PDF's vector lines), then checked
+    POST /ruletrace/copilot/read            a picture (png/jpg) or a drawing page (pdf, also scanned): Gemini reads
+                                            it, code confirms every reading on the image; picture values are
+                                            checked against the full texts
+    POST /ruletrace/copilot/design          rooms read from a drawing -> a RuleTrace design (cabins, hospital,
+                                            spaces), checked by the rule engine and shown in 3D. Needs an
+                                            engineer's approval of the readings first (approved=true)
+
+Gemini is optional and kept apart: it only reads drawings and pictures (GEMINI_API_KEY). Without it, everything
+else works.
+
+Confidential mode (COPILOT_CONFIDENTIAL, default ON, for Meyer designs): nothing leaves this computer. The bot uses
+only the local Ollama model, and Gemini and Groq are off even if their keys are set. Retrieval, OCR, unit checks and
+verdicts always run locally. COPILOT_CONFIDENTIAL=0 is for public documents and demos only.
+
+The regulation texts are in ruletrace/copilot_rules/: 46 CFR Part 190 and the ADA/ABA technical requirements
+(36 CFR 1191 App. D), public domain and in git; the Maritime Labour Convention 2006 (ILO) is downloaded from the
+ILO when the index is built (scripts/fetch_mlc.py) and not committed. The index and caches live under VARTIJA_UPLOAD_DIR/copilot (git-ignored).
+Needs the optional dependencies: pip install -e ".[copilot]".
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import io
+import os
+import tempfile
+from pathlib import Path
+
+from fastapi import Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
+from vartija_core import audit
+from vartija_core.api import Principal
+
+RULES = Path(__file__).parent / "copilot_rules"
+DEFAULT_DOCS = ["36CFR1191AppD", "46CFR190", "MLC2006"]  # those of them that are loaded
+MAX_PDF_PAGES = 400
+MIN_ROOMS = 3  # fewer confirmed rooms than this make no meaningful RuleTrace design
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+    docs: list[str] | None = Field(default=None, description="Rule documents to search; default all")
+    model: str | None = Field(default=None, description="one of /copilot/status models[].id; default: Groq, then Ollama")
+
+
+class CheckIn(BaseModel):
+    rows: list[dict] = Field(min_length=1, max_length=500,
+                             description="item_id, space, parameter, value (e.g. 30, 2'-6\", 1500), unit, source")
+    docs: list[str] | None = None
+
+
+class DesignIn(BaseModel):
+    readings_id: str = Field(pattern=r"^[0-9a-f]{16}$", description="id returned by /copilot/read for a drawing")
+    ship: dict = Field(default_factory=dict, description="Ship profile fields (name, ship_type, length_m, persons_total...)")
+    approved: bool = Field(default=False, description="the engineer has checked the readings against the drawing")
+    rejected: list[int] = Field(default_factory=list, description="indexes of readings the engineer rejected")
+    note: str = Field(default="", max_length=500)
+
+
+class ConfidentialIn(BaseModel):
+    on: bool
+    public_only: bool = Field(default=False, description="confirms that only public documents will be used")
+    reason: str = Field(default="", max_length=300)
+
+
+class ReviewIn(BaseModel):
+    kind: str = Field(pattern=r"^(verdict|reading|general_answer|limit)$")
+    ref: str = Field(min_length=1, max_length=300, description="what was reviewed, e.g. item id and parameter")
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    note: str = Field(default="", max_length=500)
+    detail: dict = Field(default_factory=dict)
+
+
+def configure(upload_dir: Path) -> Path:
+    """Point the RuleMate package at RuleTrace's folders before it is imported."""
+    base = Path(upload_dir) / "copilot"
+    os.environ.setdefault("RULES_DIR", str(RULES))
+    os.environ.setdefault("INDEX_DIR", str(base / "index"))
+    os.environ.setdefault("RULEMATE_CACHE_DIR", str(base / "cache"))
+    return base
+
+
+BOT_PROVIDERS = "groq,ollama"
+
+
+OFF_MINUTES = 60  # confidential mode switched off in the panel comes back on by itself after this
+_switch: dict = {}  # runtime switch from the panel: {"off_until": epoch, "by": name, "reason": ...}
+
+
+def _env_confidential() -> bool:
+    return os.getenv("COPILOT_CONFIDENTIAL", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def confidential_locked() -> bool:
+    """COPILOT_CONFIDENTIAL_LOCK=1 (for Meyer installations): confidential mode cannot be switched off in the panel."""
+    return os.getenv("COPILOT_CONFIDENTIAL_LOCK", "0").strip() == "1"
+
+
+def confidential() -> bool:
+    """Confidential mode (default ON, for Meyer designs): nothing leaves this computer. The bot uses only the local
+    Ollama model and Gemini is off, even if keys are set. An engineer can switch it off in the panel for public
+    documents (for OFF_MINUTES, recorded in the audit log), unless COPILOT_CONFIDENTIAL_LOCK=1.
+    COPILOT_CONFIDENTIAL=0 starts with it off."""
+    import time
+
+    if confidential_locked():
+        return True
+    until = _switch.get("off_until")
+    if until is not None:
+        if until > time.time():
+            return False
+        _switch.clear()  # the time is up: back to confidential
+        return True
+    if _switch.get("on"):
+        return True
+    return _env_confidential()
+
+
+def gemini_enabled() -> bool:
+    return not confidential() and bool(os.getenv("GEMINI_API_KEY"))
+
+
+def gemini_off_reason() -> str:
+    return ("Confidential mode: Gemini is off so drawings and pictures never leave this computer "
+            "(switch it off in the panel only for public documents)" if confidential()
+            else "set GEMINI_API_KEY in .env to read drawings and pictures (optional)")
+# models the user can choose in Ask (Groq free tier and the local Ollama model); never Gemini
+BOT_MODELS = [("groq", "openai/gpt-oss-120b"), ("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"),
+              ("ollama", os.getenv("OLLAMA_MODEL", "qwen3:8b")), ("ollama", "llama3.2:3b")]
+BOT_MODELS = list(dict.fromkeys(BOT_MODELS))
+
+
+def _ollama_installed() -> set[str] | None:
+    """Model tags pulled into the local Ollama, or None if Ollama does not answer."""
+    import httpx
+
+    try:
+        tags = httpx.get(os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/") + "/api/tags",
+                         timeout=2).json().get("models", [])
+        return {t["name"] for t in tags}
+    except Exception:
+        return None
+
+
+def bot_models() -> list[dict]:
+    import json
+
+    measured = {}
+    try:
+        measured = {m["id"]: m for m in json.loads((RULES / "accuracy.json").read_text(encoding="utf-8")).get("models", [])}
+    except (OSError, ValueError):
+        pass
+    conf = confidential()
+    local = _ollama_installed()
+    out = [{"id": "auto", "name": "Automatic (local Ollama)" if conf else "Automatic (Groq, then local Ollama)",
+            "ready": True}]
+    for prov, model in BOT_MODELS:
+        mid = f"{prov}:{model}"
+        cloud = prov == "groq"
+        if cloud:
+            ready = not conf and bool(os.getenv("GROQ_API_KEY"))
+            why = "" if ready else ("off in confidential mode" if conf else "no GROQ_API_KEY")
+        else:
+            ready = local is not None and model in local
+            why = "" if ready else ("Ollama is not running" if local is None else f"not installed: ollama pull {model}")
+        out.append({"id": mid, "name": f"{model} ({'Groq, cloud' if cloud else 'Ollama, on this computer'})",
+                    "ready": ready, "why_not": why, "cloud": cloud, "accuracy": measured.get(mid)})
+    return out
+
+
+def bot_llm(choice: str | None):
+    """The chosen bot model, or the Groq -> Ollama chain. Only the listed models can be chosen."""
+    from rulemate.llm import ChainLLM, get_llm, make_provider
+
+    if not choice or choice == "auto":
+        return get_llm(provider())
+    allowed = {f"{p}:{m}": (p, m) for p, m in BOT_MODELS}
+    if choice not in allowed:
+        raise HTTPException(400, f"unknown model {choice!r}; choose one of: auto, {', '.join(allowed)}")
+    prov, model = allowed[choice]
+    if prov != "ollama" and confidential():
+        raise HTTPException(403, "Confidential mode: only the local Ollama model may answer; nothing leaves this computer")
+    llm = make_provider(prov)
+    llm.model = model
+    if prov == "ollama":
+        llm.timeout = max(getattr(llm, "timeout", 30), 120)  # a small local model is slower
+    return ChainLLM([llm])
+
+
+def provider() -> str:
+    """The chat bot uses Groq, then the local Ollama model; never Gemini (kept for reading drawings only).
+    In confidential mode only Ollama."""
+    if confidential():
+        return "ollama"
+    names = [n.strip() for n in os.getenv("COPILOT_LLM_PROVIDER", BOT_PROVIDERS).split(",")
+             if n.strip() and n.strip().lower() != "gemini"]
+    return ",".join(names) or BOT_PROVIDERS
+
+
+def vision_llm():
+    from rulemate.llm import make_provider
+
+    if confidential():  # second guard: no code path may reach Gemini in confidential mode
+        raise HTTPException(403, gemini_off_reason())
+    llm = make_provider("gemini")  # rotates over the free flash models when one's daily quota is used up
+    if os.getenv("GEMINI_VISION_MODEL"):
+        llm.model = os.getenv("GEMINI_VISION_MODEL")
+    llm.timeout = max(llm.timeout, 240)
+    return llm
+
+
+def _png_url(png: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(png).decode()
+
+
+def _crop_url(img, box, margin=140) -> str:
+    from PIL import ImageDraw
+
+    x0, y0, x1, y1 = (int(v) for v in box)
+    im = img.copy()
+    ImageDraw.Draw(im).rectangle((x0 - 6, y0 - 6, x1 + 6, y1 + 6), outline=(214, 39, 40), width=4)
+    im = im.crop((max(0, x0 - margin), max(0, y0 - margin), min(im.width, x1 + margin), min(im.height, y1 + margin)))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return _png_url(buf.getvalue())
+
+
+def deciding(res) -> dict | None:
+    """The limit that decided a verdict: the failed one, else the closest one."""
+    ap = res.applied
+    if not ap:
+        return None
+    failed = [x for x in ap if x.outcome == "fail" and x.role == "applied"]
+
+    def margin(x):
+        v = x.value_in_limit_unit
+        return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
+
+    d = min(failed or ap, key=margin)  # the closest limit: for a fail, the one missed by the least
+    # numbers for the value-vs-limit chart, both in the limit's unit
+    return {"limit": d.limit.describe(), "uid": d.limit.clause_uid, "clause": f"{d.limit.doc} § {d.limit.clause_id}",
+            "limit_value": d.limit.value, "value_in_limit_unit": d.value_in_limit_unit, "unit": d.limit.unit,
+            "comparator": d.limit.comparator}
+
+
+def design_from_rooms(rooms: list[dict], page_w: float, page_h: float, ship: dict, filename: str, page: int) -> dict:
+    """Confirmed Gemini readings of a GA sheet -> RuleTrace design JSON. Cabins carry berths only when the drawing
+    states them (printed count, SINGLE/DOUBLE); positions come from the label position on the sheet, scaled to the
+    ship length (approximate, as in RuleTrace's own GA reader)."""
+    length = float(ship.get("length_m") or 60.0)
+    scale = length / page_w
+    elements = []
+    seen: set[str] = set()
+    for i, r in enumerate(rooms):
+        if not r["confirmed"] or r["kind"] not in ("stateroom", "hospital") or r.get("rejected"):
+            continue
+        key = r.get("room_number") or f"{r['label']}-{i}"
+        if key in seen:
+            continue
+        seen.add(key)
+        x0, y0, x1, y1 = r["bbox"]
+        cx, cy = (x0 + x1) / 2 * scale, ((y0 + y1) / 2 - page_h / 2) * scale
+        name = " ".join(r["label"].split()).title() + (f" {r['room_number']}" if r.get("room_number") else "")
+        if r["kind"] == "hospital":
+            etype, props = "hospital", {}
+        else:
+            etype = "cabin"
+            props = {"berths": int(r["berths"])} if r.get("berths_confirmed") and r.get("berths") else {}
+        props["read_by"] = "Gemini, confirmed in code at the label position"
+        elements.append({"id": f"G{page}-{len(elements) + 1:03d}", "type": etype, "name": name,
+                         "deck": f"sheet p.{page}", "box": [round(cx - 1.5, 2), round(cy - 1.5, 2), 0, 3, 3, 2.4],
+                         "props": props})
+    return {"title": f"{filename} p.{page} (read by Gemini)",
+            "ship": {"name": ship.get("name") or Path(filename).stem, "ship_type": ship.get("ship_type", "research"),
+                     **{k: v for k, v in ship.items() if k not in ("name", "ship_type")}},
+            "elements": elements}
+
+
+def add_copilot_routes(app, router, engineer, path_of, save) -> None:
+    base = configure(app.state.settings.upload_dir)
+    readings_dir = base / "readings"
+
+    def _audit(who: Principal, action: str, payload: dict) -> None:
+        with app.state.session_factory() as s:
+            audit.append(s, action=action, actor=who.name, actor_kind=who.kind, payload=payload)
+            s.commit()
+
+    def _require():
+        try:
+            import rulemate.config  # noqa: F401  (also loads .env: GEMINI_API_KEY, GROQ_API_KEY)
+            import rank_bm25  # noqa: F401
+            import pint  # noqa: F401
+        except ImportError as exc:
+            raise HTTPException(501, f'Copilot not installed ({exc.name}): pip install -e ".[copilot]"') from exc
+
+    def _loaded(docs: list[str]) -> list[str]:
+        from rulemate.ingest import load_index
+
+        have = {d.doc for d in load_index().documents} if _index_ready() else set()
+        return [d for d in docs if d in have] or docs[:2]
+
+    def _index_ready() -> bool:
+        from rulemate.config import CLAUSES_FILE
+
+        return CLAUSES_FILE.exists()
+
+    @router.get("/copilot/status")
+    def status(who: Principal = Depends(engineer)) -> dict:
+        try:
+            _require()
+        except HTTPException as e:
+            return {"installed": False, "message": e.detail}
+        out = {"installed": True, "index": _index_ready(), "provider": provider(),
+               **_mode(), "gemini": gemini_enabled(), "gemini_off": gemini_off_reason(),
+               "gemini_role": "optional: reads drawings and pictures only",
+               "models": bot_models(),
+               "documents": []}
+        if out["index"]:
+            from rulemate.ingest import load_index
+
+            out["documents"] = [{"doc": d.doc, "title": d.title, "clauses": d.n_clauses}
+                                for d in load_index().documents]
+        return out
+
+    @router.post("/copilot/index")
+    def build_index(who: Principal = Depends(engineer)) -> dict:
+        _require()
+        from rulemate.compliance.service import get_rule_table
+        from rulemate.ingest import ingest_dir
+        from rulemate.retrieval import get_retriever
+
+        mlc = RULES / "MLC2006.md"
+        mlc_note = "loaded"
+        if not mlc.exists():
+            if os.getenv("COPILOT_FETCH_MLC", "1") == "1":
+                try:  # the ILO text is downloaded, not redistributed with the code
+                    from rulemate.ingest.mlc_fetch import fetch
+
+                    fetch(mlc)
+                    mlc_note = "downloaded from the ILO"
+                except Exception as exc:  # offline: everything else still works
+                    mlc_note = f"not available ({type(exc).__name__}); run scripts/fetch_mlc.py when online"
+            else:
+                mlc_note = "not downloaded (COPILOT_FETCH_MLC=0)"
+        res = ingest_dir()
+        r = get_retriever()
+        table = get_rule_table(method="regex", force=True)
+        out = {"documents": [d.doc for d in res.documents], "clauses": len(res.clauses), "retrieval": r.mode,
+               "limits": len(table.limits), "mlc": mlc_note}
+        _audit(who, "copilot.indexed", out)
+        return out
+
+    @router.post("/copilot/ask")
+    def ask(body: AskIn, who: Principal = Depends(engineer)) -> dict:
+        _require()
+        if not _index_ready():
+            raise HTTPException(409, "build the Copilot index first (POST /ruletrace/copilot/index)")
+        from rulemate.answer import answer_question
+        from rulemate.llm import get_llm
+        from rulemate.retrieval import get_retriever
+
+        llm = bot_llm(body.model) if body.model and body.model != "auto" else get_llm(provider())
+        a = answer_question(body.question, retriever=get_retriever(), llm=llm, use_cache=True, docs=body.docs)
+        general = None
+        if a.status == "not_found":  # not in the loaded texts: answer from general knowledge, clearly labelled
+            from rulemate.general import general_answer
+
+            general = general_answer(body.question, llm, retriever=get_retriever())
+        _audit(who, "copilot.asked", {"question": body.question, "status": a.status, "model": a.model,
+                                      "cited": [c.uid for c in a.citations],
+                                      "general": bool(general and general["ok"]),
+                                      "general_model": general["model"] if general else "", "chosen_model": body.model or "auto",
+                                      "confidential": confidential(),
+                                      "general_refs": [(r["source"], r["status"]) for r in general["references"]]
+                                      if general and general["ok"] else []})
+        return {"question": a.question, "status": a.status, "badge": a.badge, "text": a.text, "model": a.model,
+                "general": general,
+                "note": a.note, "latency_ms": a.latency_ms, "rejected_attempts": a.rejected_attempts,
+                "citations": [{"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title,
+                               "page": c.page} for c in a.citations]}
+
+    def _ready():
+        _require()
+        if not _index_ready():
+            raise HTTPException(409, "build the Copilot index first (POST /ruletrace/copilot/index)")
+        from rulemate.retrieval import get_retriever
+
+        return get_retriever()
+
+    @router.get("/copilot/clause/{uid:path}")
+    def clause(uid: str, who: Principal = Depends(engineer)) -> dict:
+        r = _ready()
+        c = r.by_uid.get(uid)
+        if c is None:
+            raise HTTPException(404, "no such clause")
+        ref = lambda x: {"uid": x.uid, "clause_id": x.clause_id, "title": x.title}  # noqa: E731
+        parent = r.by_uid.get(f"{c.doc}::{c.parent_id}") if c.parent_id else None
+        return {"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title, "text": c.text,
+                "page": c.page, "path": c.path, "kind": c.kind,
+                "parent": ref(parent) if parent else None,
+                "children": [ref(x) for x in r.children.get(c.uid, [])],
+                "refs": [ref(x) for x in (r.by_uid.get(f"{c.doc}::{i}") for i in c.refs) if x],
+                "referenced_by": [ref(x) for x in r.clauses if x.doc == c.doc and c.clause_id in x.refs]}
+
+    @router.get("/copilot/browse")
+    def browse(doc: str = "", q: str = "", who: Principal = Depends(engineer)) -> dict:
+        r = _ready()
+        if q.strip():
+            res = r.search(q, k=12, docs=[doc] if doc else None)
+            return {"mode": "search", "confidence": res.confidence, "items": [
+                {"uid": h.clause.uid, "doc": h.clause.doc, "clause_id": h.clause.clause_id, "title": h.clause.title,
+                 "kind": h.clause.kind, "how": h.source, "score": round(h.cosine or h.score, 3),
+                 "snippet": h.clause.text[:160]} for h in res.hits]}
+        items = [c for c in r.clauses if not doc or c.doc == doc]
+        return {"mode": "outline", "items": [
+            {"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title, "kind": c.kind,
+             "depth": len(c.path), "snippet": "" if c.kind == "heading" else c.text[:120]} for c in items]}
+
+    def _check(rows, docs) -> dict:
+        from rulemate.compliance.service import check_rows
+
+        results = check_rows(rows, docs=docs or None)
+        out = []
+        for res in results:
+            dec = deciding(res)
+            out.append({"item_id": res.row.item_id, "space": res.row.space, "parameter": res.row.parameter,
+                        "value": res.row.display, "verdict": res.shown_verdict, "reason": res.reason,
+                        "deciding": dec,
+                        "source": res.row.source})
+        counts = {v: sum(x["verdict"] == v for x in out) for v in ("PASS", "FAIL", "NEEDS REVIEW", "NO RULE", "CHECK INPUT")}
+        from rulemate.design.summary import summarize_check
+
+        return {"counts": counts, "results": out, "docs": docs or "all",
+                "in_short": summarize_check(out, docs or ["the loaded rule texts"])}
+
+    @router.post("/copilot/check")
+    def check_values(body: CheckIn, who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from rulemate.compliance.check import DesignRow
+        from rulemate.compliance.units import parse_value
+
+        rows = []
+        for i, d in enumerate(body.rows, start=1):
+            raw = str(d.get("value", "")).strip()
+            value, unit = parse_value(raw, str(d.get("unit") or "").strip())
+            if not str(d.get("parameter") or "").strip():
+                raise HTTPException(400, f"row {i}: parameter is required")
+            rows.append(DesignRow(item_id=str(d.get("item_id") or f"V{i}"), space=str(d.get("space") or ""),
+                                  parameter=str(d["parameter"]), value=value, unit=unit, raw_value=raw,
+                                  source=str(d.get("source") or "entered in RuleTrace")))
+        out = _check(rows, body.docs)
+        _audit(who, "copilot.checked", {"rows": len(rows), "counts": out["counts"], "docs": body.docs})
+        return out
+
+    @router.post("/copilot/check/csv")
+    async def check_csv(file: UploadFile = File(...), docs: str = Form(default=""),
+                        who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from rulemate.compliance.check import read_design_csv
+
+        try:
+            rows = read_design_csv(await file.read())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        out = _check(rows, [d for d in docs.split(",") if d])
+        _audit(who, "copilot.checked", {"file": Path(file.filename or "").name, "rows": len(rows), "counts": out["counts"]})
+        return out
+
+    @router.post("/copilot/check/file")
+    async def check_file(file: UploadFile = File(...), page: int = Form(default=1), docs: str = Form(default=""),
+                         who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from PIL import Image
+        from rulemate.design.values import values_from_file
+
+        data = await file.read()
+        if len(data) > app.state.settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, "file too large")
+        name = Path(file.filename or "upload").name
+        needs_gemini = not name.lower().endswith(".csv")
+        llm = vision_llm() if needs_gemini and gemini_enabled() else None
+        if needs_gemini and llm is None and not name.lower().endswith(".pdf"):
+            raise HTTPException(403 if confidential() else 503, gemini_off_reason())
+        try:
+            fv = values_from_file(data, name, llm=llm, page=page)
+        except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words
+            from rulemate.design.summary import _explain_error
+
+            return {"kind": "error", "file": name, "counts": {}, "results": [], "docs": docs,
+                    "in_short": {"headline": f"Nothing could be read from {name}.", "points": [_explain_error(str(exc))],
+                                 "next": ["Nothing was checked. Try again later, another page, or a CSV."]}}
+        out = _check(fv.rows, [d for d in docs.split(",") if d]) if fv.rows else {
+            "counts": {"PASS": 0, "FAIL": 0, "NEEDS REVIEW": 0, "NO RULE": 0, "CHECK INPUT": 0}, "results": [],
+            "docs": docs or "all"}
+        out.update(kind=fv.kind, notes=fv.notes, file=name)
+        if fv.png:
+            img = Image.open(io.BytesIO(fv.png)).convert("RGB")
+            # to_rows numbers the confirmed readings P01, P02, ... in order
+            crops = {f"P{i:02d}": _crop_url(img, v.bbox_px)
+                     for i, v in enumerate([v for v in fv.readings if v.confirmed], start=1)}
+            for x in out["results"]:
+                x["crop"] = crops.get(x["item_id"])
+            out["unconfirmed"] = [{"space": v.space, "parameter": v.parameter, "written": v.value_text}
+                                  for v in fv.readings if not v.confirmed]
+        _audit(who, "copilot.checked", {"file": name, "kind": fv.kind, "sha256": hashlib.sha256(data).hexdigest(),
+                                        "rows": len(fv.rows), "counts": out["counts"]})
+        return out
+
+    @router.get("/copilot/example.csv", response_class=PlainTextResponse)
+    def example_csv(who: Principal = Depends(engineer)) -> str:
+        return (RULES / "accessible_stateroom_example.csv").read_text(encoding="utf-8")
+
+    @router.post("/copilot/read")
+    async def read(file: UploadFile = File(...), page: int = Form(default=1), docs: str = Form(default=""),
+                   who: Principal = Depends(engineer)) -> dict:
+        _require()
+        if not gemini_enabled():
+            raise HTTPException(403 if confidential() else 503, gemini_off_reason())
+        data = await file.read()
+        if len(data) > app.state.settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, "file too large")
+        name = Path(file.filename or "upload").name
+        sha = hashlib.sha256(data).hexdigest()
+        llm = vision_llm()
+        try:
+            if name.lower().endswith(".pdf"):
+                out = _read_drawing(data, name, page, llm)
+            elif name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                out = _read_picture(data, name, llm, [d for d in docs.split(",") if d] or _loaded(DEFAULT_DOCS))
+            else:
+                raise HTTPException(400, "upload a picture (.png, .jpg) or a drawing (.pdf)")
+        except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words
+            from rulemate.design.summary import summarize_drawing
+
+            msg = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            return {"kind": "error", "file": name, "items": [], "n_readings": 0, "n_confirmed": 0,
+                    "in_short": summarize_drawing([], {}, error=str(msg))}
+        _audit(who, "copilot.read", {"file": name, "sha256": sha, "kind": out["kind"], "model": llm.model,
+                                     "readings": out["n_readings"], "confirmed": out["n_confirmed"]})
+        return out
+
+    def _read_picture(data: bytes, name: str, llm, docs: list[str]) -> dict:
+        from PIL import Image
+        from rulemate.compliance.service import check_rows
+        from rulemate.design.picture import read_picture, to_rows
+
+        values, png = read_picture(data, llm)
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        results = check_rows(to_rows(values, name), docs=docs) if _index_ready() else []
+        res_by_text = {(r.row.parameter, r.row.raw_value): r for r in results}
+        items = []
+        for v in values:
+            r = res_by_text.get((v.parameter, v.value_text))
+            items.append({
+                "space": v.space, "parameter": v.parameter, "written": v.value_text, "unit": v.unit,
+                "confirmed": v.confirmed, "evidence": v.evidence, "notes": v.notes,
+                "verdict": r.shown_verdict if r else None,
+                "reason": r.reason if r else ("" if v.confirmed else "not found on the picture: not checked"),
+                "clauses": sorted({f"{x.limit.doc} § {x.limit.clause_id}" for x in r.applied}) if r else [],
+                "deciding": deciding(r) if r else None,
+                "crop": _crop_url(img, v.bbox_px)})
+        small = img.copy()
+        small.thumbnail((900, 900))
+        buf = io.BytesIO()
+        small.save(buf, format="PNG")
+        from rulemate.design.summary import summarize_check
+
+        checked = [{"verdict": r.shown_verdict, "parameter": r.row.parameter, "value": r.row.display,
+                    "deciding": deciding(r)} for r in results]
+        return {"kind": "picture", "file": name, "preview": _png_url(buf.getvalue()), "items": items,
+                "n_readings": len(values), "n_confirmed": sum(v.confirmed for v in values), "docs": docs,
+                "in_short": summarize_check(checked, docs)}
+
+    def _read_drawing(data: bytes, name: str, page: int, llm) -> dict:
+        import json
+
+        import pdfplumber
+        from rulemate.design.extract import ocr_page
+        from rulemate.design.vision import read_sheet, render_png
+
+        with tempfile.TemporaryDirectory() as td:
+            pdf = Path(td) / "drawing.pdf"
+            pdf.write_bytes(data)
+            with pdfplumber.open(pdf) as doc:
+                n = len(doc.pages)
+            if not 1 <= page <= min(n, MAX_PDF_PAGES):
+                raise HTTPException(400, f"page must be between 1 and {n}")
+            words = ocr_page(pdf, page, 300)
+            rooms = read_sheet(pdf, page, llm, words)
+            from rulemate.design.summary import drawing_facts, summarize_drawing
+
+            facts = drawing_facts(words)
+            png, w, h = render_png(pdf, page, 110)
+        rid = hashlib.sha256(data + str(page).encode()).hexdigest()[:16]
+        rows = [r.__dict__ for r in rooms]
+        readings_dir.mkdir(parents=True, exist_ok=True)
+        (readings_dir / f"{rid}.json").write_text(json.dumps({"file": name, "page": page, "w": w, "h": h,
+                                                               "rooms": rows}), encoding="utf-8")
+        cabins = [r for r in rows if r["confirmed"] and r["kind"] == "stateroom"]
+        return {"kind": "drawing", "file": name, "page": page, "pages": n, "readings_id": rid,
+                "preview": _png_url(png), "items": rows, "n_readings": len(rows),
+                "n_confirmed": sum(r["confirmed"] for r in rows),
+                "in_short": summarize_drawing(rows, facts),
+                "summary": {"cabins": len(cabins),
+                            "berths_confirmed": sum(r["berths"] or 0 for r in cabins if r["berths_confirmed"]),
+                            "hospital": any(r["confirmed"] and r["kind"] == "hospital" for r in rows)}}
+
+    reviews_file = base / "reviews.jsonl"
+    _switch.clear()  # a (re)started server always starts from the configured mode
+
+    @router.post("/copilot/confidential")
+    def set_confidential(body: ConfidentialIn, who: Principal = Depends(engineer)) -> dict:
+        """Switch confidential mode. Off only with an explicit 'public documents only' confirmation and a reason;
+        it comes back on by itself after OFF_MINUTES. Every switch goes to the audit chain."""
+        import time
+
+        if body.on:
+            _switch.clear()
+            _switch["on"] = True
+        else:
+            if confidential_locked():
+                raise HTTPException(403, "Confidential mode is locked on for this installation (COPILOT_CONFIDENTIAL_LOCK=1)")
+            if not body.public_only or len(body.reason.strip()) < 3:
+                raise HTTPException(400, "To switch confidential mode off, confirm that only public documents will be "
+                                         "used and give a reason")
+            _switch.clear()
+            _switch.update(off_until=time.time() + OFF_MINUTES * 60, by=who.name, reason=body.reason.strip())
+        _audit(who, "copilot.confidential", {"on": confidential(), "reason": body.reason.strip(),
+                                             "minutes": None if body.on else OFF_MINUTES})
+        return _mode()
+
+    def _mode() -> dict:
+        import time
+
+        until = _switch.get("off_until")
+        return {"confidential": confidential(), "locked": confidential_locked(),
+                "off_until": time.strftime("%H:%M", time.localtime(until)) if until and not confidential() else None,
+                "off_by": _switch.get("by") if not confidential() else None, "off_minutes": OFF_MINUTES}
+
+    @router.post("/copilot/review")
+    def review(body: ReviewIn, who: Principal = Depends(engineer)) -> dict:
+        """A human decision on something code could not settle alone; kept in the audit chain and listed."""
+        import json
+        from datetime import datetime, timezone
+
+        rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "by": who.name, **body.model_dump()}
+        reviews_file.parent.mkdir(parents=True, exist_ok=True)
+        with reviews_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        _audit(who, "copilot.reviewed", rec)
+        return rec
+
+    @router.get("/copilot/reviews")
+    def reviews(who: Principal = Depends(engineer)) -> list[dict]:
+        import json
+
+        if not reviews_file.exists():
+            return []
+        return [json.loads(x) for x in reviews_file.read_text(encoding="utf-8").splitlines() if x.strip()][-200:][::-1]
+
+    @router.get("/copilot/accuracy")
+    def accuracy(who: Principal = Depends(engineer)) -> dict:
+        import json
+
+        return json.loads((RULES / "accuracy.json").read_text(encoding="utf-8"))
+
+    @router.post("/copilot/design")
+    def to_design(body: DesignIn, who: Principal = Depends(engineer)) -> dict:
+        import json
+
+        from .model import DesignError, design_from_dict
+
+        p = readings_dir / f"{body.readings_id}.json"
+        if not p.exists():
+            raise HTTPException(404, "read the drawing first (POST /ruletrace/copilot/read)")
+        if not body.approved:
+            raise HTTPException(428, "An engineer must approve the readings first: check the rooms against the drawing, "
+                                     "untick any that are wrong, then confirm.")
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        for i in body.rejected:
+            if 0 <= i < len(rec["rooms"]):
+                rec["rooms"][i]["rejected"] = True
+        raw = design_from_rooms(rec["rooms"], rec["w"], rec["h"], body.ship, rec["file"], rec["page"])
+        if len(raw["elements"]) < MIN_ROOMS:
+            found = ", ".join(e["name"] for e in raw["elements"]) or "none"
+            raise HTTPException(422, f"Only {len(raw['elements'])} cabin(s)/hospital confirmed on this sheet ({found}): too few "
+                                     "for a meaningful design check. This drawing may not print names on its cabins, or "
+                                     "another sheet shows the accommodation.")
+        try:
+            design = design_from_dict(raw, source_file=rec["file"])
+        except DesignError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        design.interpretation["source"] = f"{rec['file']} p.{rec['page']}"
+        design.interpretation["read_by"] = ("Gemini, every room confirmed in code at its label position; positions "
+                                            "approximate (label position scaled to the ship length)")
+        design.interpretation["approved_by"] = who.name
+        _audit(who, "copilot.approved", {"readings_id": body.readings_id, "file": rec["file"], "page": rec["page"],
+                                         "rooms_used": len(raw["elements"]), "rejected": body.rejected,
+                                         "note": body.note})
+        return save(design, json.dumps(raw).encode(), f"{Path(rec['file']).stem}_p{rec['page']}_gemini.json", who)

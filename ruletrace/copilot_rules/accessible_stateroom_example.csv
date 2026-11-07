@@ -1,0 +1,10 @@
+item_id,space,parameter,value,unit,source,notes
+A01,Accessible stateroom 1-10 entrance,door clear width,34,in,SYNTHETIC - interior design example,
+A02,Accessible stateroom 1-10 bathroom,door clear width,30,in,SYNTHETIC - interior design example,planted defect
+A03,Accessible stateroom 1-10 passage between berth and desk,walking surface clear width,36,in,SYNTHETIC - interior design example,
+A04,Accessible stateroom 1-10,turning space diameter,1500,mm,SYNTHETIC - interior design example,planted defect (1500 mm = 59.06 in)
+A05,Accessible stateroom 1-10 bathroom,clearance around water closet width,62,in,SYNTHETIC - interior design example,
+A06,Accessible stateroom 1-10 bathroom,water closet seat height,18,in,SYNTHETIC - interior design example,
+A07,Accessible stateroom 1-10 bathroom,grab bar height above finish floor,38,in,SYNTHETIC - interior design example,planted defect
+A08,Accessible stateroom 1-10,work surface height,30,in,SYNTHETIC - interior design example,
+A09,Accessible stateroom 1-10,dining surface height,36,in,SYNTHETIC - interior design example,planted defect

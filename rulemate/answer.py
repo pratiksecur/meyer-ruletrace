@@ -1,0 +1,460 @@
+"""Question -> retrieved clauses -> LLM answer -> guardrails -> verified answer, excerpts, or 'not found'.
+
+Code decides what is shown:
+* retrieval confidence "none"           -> "Not found in the provided rules" + closest clauses (no LLM call)
+* LLM replies NOT_FOUND on a weak match -> same (on a confident match or a named clause: excerpts instead)
+* answer passes every guardrail         -> status "verified"
+* fails twice / LLM down or too slow    -> status "excerpts": the matching clause text, labelled as excerpts
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+from typing import Literal
+
+from pydantic import BaseModel
+
+from .config import CLAUSES_FILE, ROOT, CACHE_DIR
+from .guardrails import CITATION_RE, check_answer, extract_numbers
+from .ingest.parsers import NOT_A_VALUE
+from .llm import LLMError, get_llm
+from .models import Clause
+from .retrieval import Hit, RetrievalResult, Retriever, get_retriever
+
+CACHE_FILE = CACHE_DIR / "answers.json"
+MAX_CONTEXT = 12
+NOT_FOUND_TEXT = "Not found in the provided rules."
+
+SYSTEM_PROMPT = """You are RuleMate, an assistant for ship designers. You answer questions about design rules \
+using ONLY the rule clauses given to you. You never use outside knowledge.
+
+Rules for your answer:
+1. Every sentence must contain at least one citation in the exact form [doc § clause], copied exactly from the \
+header line of the clause that supports it. Put the citation at the end of the sentence, before the full stop.
+2. Cite only clauses from the list you are given.
+3. Copy every number and unit exactly as written in the clause you cite. Do not convert units, round, or calculate new numbers.
+4. If you quote, quote word for word and put the quote in double quotes.
+5. Do not guess. Never use words like "probably", "typically", "usually", "likely", "generally".
+6. State conditions and exceptions that the clauses give (for example "provided that ...").
+7. If a clause refers to another clause that is in the list (for example "calculated in accordance with 4.2"), also state what the referenced clause requires, and cite it.
+8. If clauses from different documents answer the question, give each document's requirement in its own sentence.
+9. Include every number that answers the question, with its unit, exactly as written.
+10. A clause marked GUIDANCE is not mandatory: prefer a mandatory clause that answers the question, and if you use
+guidance, say that it is guidance ("should"). State who a clause applies to when its heading limits it (e.g. young
+seafarers, passenger ships).
+11. Never answer yes or no unless a cited clause states it; otherwise state what the clause requires.
+12. If the clauses do not answer the question, reply with exactly: NOT_FOUND
+13. Be concise: 1 to 6 sentences, or a short bullet list. No preamble, no closing remarks."""
+
+
+class Citation(BaseModel):
+    doc: str
+    clause_id: str
+    uid: str
+    title: str = ""
+    page: int | None = None
+    synthetic: bool = False
+
+
+class Answer(BaseModel):
+    question: str
+    status: Literal["verified", "excerpts", "not_found"]
+    text: str
+    citations: list[Citation] = []
+    sources: list[Hit] = []
+    confidence: str = ""
+    top_score: float = 0.0
+    attempts: int = 0
+    violations: list[str] = []  # from the last failed attempt (empty when verified)
+    rejected_attempts: int = 0  # how many LLM drafts the guardrails rejected
+    note: str = ""
+    model: str = ""
+    cached: bool = False
+    latency_ms: float = 0.0
+    synthetic: bool = False
+
+    @property
+    def badge(self) -> str:
+        return {"verified": "verified", "excerpts": "excerpts only", "not_found": "not found"}[self.status]
+
+
+# ------------------------------------------------------------------ prompt
+
+
+def context_clauses(res: RetrievalResult) -> list[Hit]:
+    order = {"id": 0, "child": 1, "search": 2, "xref": 3}
+    hits = [h for h in res.hits if h.clause.kind != "heading" or h.source == "id"]
+    hits.sort(key=lambda h: order[h.source])  # stable: keeps rank order within each group
+    return hits[:MAX_CONTEXT]
+
+
+def format_context(hits: list[Hit]) -> str:
+    blocks = []
+    shown = {h.clause.clause_id for h in hits}
+    for h in hits:
+        c = h.clause
+        meta = [c.title] if c.title else []
+        if c.page:
+            meta.append(f"page {c.page}")
+        if h.source == "xref" and h.via:
+            meta.append(f"referenced by {h.via}")
+        visible = [r for r in c.refs if r in shown]  # only point at clauses the model can see and cite
+        human = readable_id(c)
+        if human:
+            meta.insert(0, f"= {human}")
+        if human.startswith("Guideline"):
+            meta.append("GUIDANCE (MLC Part B): not mandatory")
+        blocks.append(f"{c.citation} {' | '.join(meta)}\n{expand_refs(c.text, visible)}")
+    return "\n\n".join(blocks)
+
+
+def readable_id(c: Clause) -> str:
+    """How people write an MLC reference: A3.1/6(a) = "Standard A3.1, paragraph 6(a)"."""
+    if not c.doc.upper().startswith("MLC"):
+        return ""
+    m = re.match(r"^(?:(?P<k>[AB])(?P<n>\d[\d.]*)|R(?P<r>\d[\d.]*)|Art\.(?P<a>[IVX]+))(?:/(?P<p>\d+)(?P<l>\([a-z]\))?)?$",
+                 c.clause_id)
+    if not m:
+        return ""
+    head = (f"{'Standard' if m.group('k') == 'A' else 'Guideline'} {m.group('k')}{m.group('n')}" if m.group("k")
+            else f"Regulation {m.group('r')}" if m.group("r") else f"Article {m.group('a')}")
+    return head + (f", paragraph {m.group('p')}{m.group('l') or ''}" if m.group("p") else "")
+
+
+def expand_refs(text: str, refs: list[str]) -> str:
+    """'... given in 3.1.1.' -> '... given in 3.1.1 (= II-2/13.3.1.1).' so the model can cite the right clause."""
+    for ref in refs:
+        local = ref.split("/")[-1].split(" [")[-1].rstrip("]")
+        parts = local.split(".")
+        forms = sorted({local} | {".".join(parts[k:]) for k in range(1, len(parts) - 1)}, key=len, reverse=True)
+        for f in forms:
+            if f == ref or "." not in f:
+                continue
+            m = re.search(rf"(?<![\w.\[]){re.escape(f)}(?![\w]|\.\d){NOT_A_VALUE}", text)
+            if m:
+                text = f"{text[:m.end()]} (= {ref}){text[m.end():]}"
+                break
+        else:
+            t = re.search(rf"\b{re.escape(ref.split(' ', 1)[-1])}\b", text) if " Table " in ref else None
+            if t and ref not in text:
+                text = f"{text[:t.end()]} (= {ref}){text[t.end():]}"
+    return text
+
+
+def build_messages(question: str, hits: list[Hit], confidence: str) -> list[dict]:
+    caution = (
+        "\nThe search found only a weak match. Check carefully whether these clauses really answer the question; "
+        "if they do not, reply NOT_FOUND."
+        if confidence == "low"
+        else ""
+    )
+    user = f"Rule clauses:\n\n{format_context(hits)}\n\nQuestion: {question}{caution}"
+    return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
+
+
+_REQUIREMENT = re.compile(r"\b(shall|must|should|minimum|maximum|min\.|max\.|not less|not more|at least|"
+                          r"not exceed|no more|no less|required|permitted)\b", re.I)
+MAX_KEY_VALUES = 6
+
+
+def key_values(answer: str, cited: list[Clause], hits: list[Hit]) -> list[tuple[Clause, str]]:
+    """Requirement sentences (or table rows) with a value the answer leaves out, from the cited clauses and the
+    clauses they refer to. Quoted word for word, so a number can never go missing from a verified answer."""
+    have = {v for v, _ in extract_numbers(CITATION_RE.sub("", answer))}
+    ids = {c.clause_id for c in cited}
+    pool = list(cited)
+    for h in hits:  # clauses the cited ones refer to ("calculated in accordance with 4.2")
+        c = h.clause
+        if c.clause_id not in ids and (h.via in ids or any(c.clause_id in x.refs for x in cited)):
+            pool.append(c)
+            ids.add(c.clause_id)
+    out: list[tuple[Clause, str]] = []
+    for c in pool:
+        if c.kind == "heading":
+            continue
+        lines = c.text.splitlines()
+        if any(l.startswith("|") for l in lines):  # a table: its rows, header kept
+            rows = [l for l in lines if l.startswith("|") and not re.fullmatch(r"[|\s:-]+", l)]
+            missing = [r for r in rows[1:] if any(v not in have for v, _ in extract_numbers(r))]
+            if missing:
+                out.append((c, "\n".join(rows[:1] + missing[:8])))
+            continue
+        for sent in re.split(r"(?<=[.;])\s+(?=[A-Z(])", c.text):
+            vals = [v for v, u in extract_numbers(sent) if u]
+            if vals and any(v not in have for v in vals) and _REQUIREMENT.search(sent):
+                out.append((c, re.sub(r"\s+(?:Exceptions?:\s*)?\d{1,2}\.$", "", sent.strip())))  # "... stop. 2."
+                have.update(vals)
+            if len(out) >= MAX_KEY_VALUES:
+                return out
+    return out[:MAX_KEY_VALUES]
+
+
+def with_key_values(text: str, cited: list[Clause], hits: list[Hit]) -> tuple[str, list[str]]:
+    kv = key_values(text, cited, hits)
+    if not kv:
+        return text, []
+    quoted = []
+    for c, q in kv:
+        body = q if q.startswith("|") else f"> {q} {c.citation}"
+        quoted.append(f"{c.citation}\n{q}" if q.startswith("|") else body)
+    return (text + "\n\n**Also stated in the cited clauses** (quoted word for word, not generated):\n"
+            + "\n".join(quoted)), [c.uid for c, _ in kv]
+
+
+def is_not_found(text: str) -> bool:
+    return bool(re.match(r"^\W*NOT[_ ]FOUND\b", text.strip(), re.I))
+
+
+def strip_reasoning(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+
+
+# ------------------------------------------------------------------ fallbacks
+
+
+def _citations(clauses: list[Clause]) -> list[Citation]:
+    return [
+        Citation(doc=c.doc, clause_id=c.clause_id, uid=c.uid, title=c.title, page=c.page, synthetic=c.synthetic)
+        for c in clauses
+    ]
+
+
+_STOP = set("""about above after again against also among another anything around because before being below
+between board cabin cabins could design designs does doing during each either every from have having into least
+maximum minimum more most much must need needed needs other over required requirement requirements rule rules
+shall should ship ships since some such than that their them then there these they this those through under until
+upon what when where which while with within without would your vessel vessels people person persons large
+larger small smaller clause clauses explain allowed number amount total kind kinds type types thing things
+narrower wider longer shorter higher lower bigger greater fewer steeper deeper thicker thinner heavier lighter
+faster slower closer further farther""".split())
+_VOCAB: dict[int, set[str]] = {}
+
+
+RARE_IN_RULES = 3  # a subject word in at most this many clauses of all the loaded rules
+_DF: dict[int, dict[str, int]] = {}
+
+
+def _doc_freq(retriever) -> dict[str, int]:
+    clauses = getattr(retriever, "clauses", None) or []
+    key = id(clauses)
+    if key not in _DF:
+        _DF.clear()
+        df: dict[str, int] = {}
+        for c in clauses:
+            for st in {w[:6] for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}:
+                df[st] = df.get(st, 0) + 1
+        _DF[key] = df
+    return _DF[key]
+
+
+def terms_not_in(question: str, clauses: list, retriever=None) -> list[str]:
+    """Specific subject words of the question ("helicopter") that none of these clauses mention and that are rare
+    in all the loaded rules; common words ("space", "limits", "seafarer") never count."""
+    words = {w for c in clauses for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}
+    missing = _unknown(question, words | {w[:6] for w in words})
+    if retriever is None:
+        return missing
+    df = _doc_freq(retriever)
+    return [w for w in missing if df.get(w[:6], 0) <= RARE_IN_RULES]
+
+
+def unknown_terms(question: str, retriever) -> list[str]:
+    """Specific words of the question that occur in no loaded clause at all (e.g. "helicopter"): the rules
+    cannot cover a subject they never mention, however well other words match."""
+    clauses = getattr(retriever, "clauses", None)
+    if not clauses:
+        return []
+    key = id(clauses)
+    if key not in _VOCAB:
+        _VOCAB.clear()
+        words = {w for c in clauses for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}
+        _VOCAB[key] = words | {w[:6] for w in words}
+    return _unknown(question, _VOCAB[key])
+
+
+def _unknown(question: str, stems: set[str]) -> list[str]:
+    words = [w for w in re.findall(r"[a-z]{5,}", question.lower()) if w not in _STOP]
+    # same first six letters = same word family (narrower ~ narrow, permissible ~ permitted is NOT matched, so
+    # only words with no relative at all in the rules count)
+    def known(w: str) -> bool:
+        roots = [w, w[:6]] + [w[: -len(e)] for e in ("er", "r", "est", "st", "ly", "s", "es") if w.endswith(e)]
+        return any(r in stems for r in roots)
+
+    return [w for w in words if not known(w)]
+
+
+def not_found_answer(question: str, res: RetrievalResult, note: str = "") -> Answer:
+    closest = [h for h in res.hits if h.source == "search"][:3]
+    lines = [NOT_FOUND_TEXT]
+    if closest:
+        lines += ["", "Closest clauses (they do not answer the question):"]
+        lines += [f"- {h.clause.citation} {h.clause.title}".rstrip() for h in closest]
+    return Answer(
+        question=question,
+        status="not_found",
+        text="\n".join(lines),
+        sources=res.hits,
+        confidence=res.confidence,
+        top_score=res.top_score,
+        note=note,
+        synthetic=any(h.clause.synthetic for h in closest),
+    )
+
+
+def excerpts_answer(question: str, res: RetrievalResult, hits: list[Hit], note: str, **kw) -> Answer:
+    primary = [h for h in hits if h.source != "xref" and h.clause.kind != "heading"][:4]
+    primary += [h for h in hits if h.source == "xref" and h.clause.kind != "heading"][:2]
+    parts = [f"**Excerpts from the matching clauses** - not a generated answer ({note})."]
+    for h in primary:
+        c = h.clause
+        page = f", p. {c.page}" if c.page else ""
+        quoted = "\n".join(f"> {line}" for line in c.text.splitlines())
+        parts.append(f"{c.citation} {c.title}{page}\n{quoted}")
+    clauses = [h.clause for h in primary]
+    return Answer(
+        question=question,
+        status="excerpts",
+        text="\n\n".join(parts),
+        citations=_citations(clauses),
+        sources=res.hits,
+        confidence=res.confidence,
+        top_score=res.top_score,
+        note=note,
+        synthetic=any(c.synthetic for c in clauses),
+        **kw,
+    )
+
+
+# ------------------------------------------------------------------ cache
+
+
+def _index_digest() -> str:
+    return hashlib.sha1(CLAUSES_FILE.read_bytes()).hexdigest()[:12] if CLAUSES_FILE.exists() else "none"
+
+
+def _cache_key(question: str, model: str) -> str:
+    q = re.sub(r"\s+", " ", question.strip().lower()).rstrip("?. ")
+    return hashlib.sha1(f"{q}|{model}|{_index_digest()}|kv1".encode()).hexdigest()  # kv1: quoted key values
+
+
+def _cache_load() -> dict:
+    try:
+        return json.loads(CACHE_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _cache_save(key: str, ans: Answer) -> None:
+    data = _cache_load()
+    data[key] = ans.model_dump(mode="json")
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(data, indent=1))
+
+
+# ------------------------------------------------------------------ main entry
+
+
+def answer_question(
+    question: str,
+    retriever: Retriever | None = None,
+    llm=None,
+    use_cache: bool = True,
+    max_attempts: int = 2,
+    docs: list[str] | None = None,
+) -> Answer:
+    t0 = time.perf_counter()
+    retriever = retriever or get_retriever()
+    llm = llm or get_llm()
+
+    def done(ans: Answer) -> Answer:
+        ans.latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        return ans
+
+    key = _cache_key(question, llm.label + (f"|{','.join(sorted(docs))}" if docs else ""))
+    if use_cache:
+        hit = _cache_load().get(key)
+        if hit:
+            ans = Answer.model_validate(hit)
+            ans.cached = True
+            return done(ans)
+
+    res = retriever.search(question, docs=docs)
+    if not res.found:
+        return done(not_found_answer(question, res))
+
+    hits = context_clauses(res)
+    retrieved = [h.clause for h in hits]
+    messages = build_messages(question, hits, res.confidence)
+
+    last_violations: list[str] = []
+    rejected = 0
+    for attempt in range(1, max_attempts + 1):
+        try:
+            raw = strip_reasoning(llm.complete(messages, max_tokens=1500))
+        except LLMError as e:
+            return done(excerpts_answer(question, res, hits, f"LLM unavailable: {str(e)[:120]}",
+                                        attempts=attempt - 1, rejected_attempts=rejected,
+                                        violations=last_violations))
+        model = llm.label
+        named = any(h.source == "id" for h in res.hits)
+        if is_not_found(raw) and (named or (res.confidence == "high"
+                                            and not terms_not_in(question, [h.clause for h in hits[:5]], retriever))):
+            # retrieval is confident (or the question names an existing clause): a refusal from the model is not
+            # enough to tell the user "not found in the rules"; show the relevant clauses instead
+            # the question names a clause, or the best clauses talk about every subject word of the question: the
+            # model's refusal alone is not enough to say "not found in the rules"; show the clauses instead.
+            # When a subject word ("helicopter") is in none of them, the "not found" stands.
+            note = ("the model gave no answer; showing the requested clause" if named
+                    else "the model gave no answer; showing the most relevant clauses")
+            return done(excerpts_answer(question, res, hits, note, attempts=attempt, rejected_attempts=rejected,
+                                        model=model))
+        if is_not_found(raw):
+            ans = not_found_answer(question, res, note="The model found no answer in the retrieved clauses.")
+            ans.attempts, ans.model, ans.rejected_attempts = attempt, model, rejected
+            if use_cache:
+                _cache_save(key, ans)
+            return done(ans)
+
+        check = check_answer(raw, retrieved)
+        if check.ok:
+            text, extra_uids = with_key_values(check.text, check.cited, hits)
+            extra = [c for c in retrieved if c.uid in extra_uids and c not in check.cited]
+            ans = Answer(
+                question=question,
+                status="verified",
+                text=text,
+                citations=_citations(list(check.cited) + extra),
+                sources=res.hits,
+                confidence=res.confidence,
+                top_score=res.top_score,
+                attempts=attempt,
+                rejected_attempts=rejected,
+                model=model,
+                synthetic=any(c.synthetic for c in check.cited),
+            )
+            if use_cache:
+                _cache_save(key, ans)
+            return done(ans)
+
+        rejected += 1
+        last_violations = [str(v) for v in check.violations]
+        messages = messages + [
+            {"role": "assistant", "content": raw},
+            {
+                "role": "user",
+                "content": "Your answer failed these automatic checks:\n- "
+                + "\n- ".join(last_violations)
+                + "\n\nRewrite the whole answer and fix every problem. Follow all the rules. Valid citations are only: "
+                + ", ".join(c.citation for c in retrieved)
+                + "\nIf the clauses do not answer the question, reply with exactly: NOT_FOUND",
+            },
+        ]
+
+    return done(
+        excerpts_answer(question, res, hits, "the generated answer did not pass verification",
+                        attempts=max_attempts, rejected_attempts=rejected, violations=last_violations,
+                        model=llm.label)
+    )
