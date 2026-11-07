@@ -52,6 +52,7 @@ class Element:
     props: dict = field(default_factory=dict)
     box: tuple[float, float, float, float, float, float] | None = None
     source: str = ""   # where this element came from: file, IFC GlobalId, drawing page
+    mesh: dict | None = None  # the model's own triangles, if it came with them (IFC): {"v": [x,y,z,...], "f": [i,j,k,...]}
 
     def geom(self, key: str) -> float | None:
         if not self.box:
@@ -118,7 +119,8 @@ def design_from_dict(d: dict, source_file: str = "") -> Design:
         elements.append(Element(id=str(raw["id"]), type=str(raw["type"]), name=str(raw.get("name", "")),
                                 deck=str(raw.get("deck", "")), zone=str(raw.get("zone", "")),
                                 props=dict(raw.get("props", {})), box=tuple(box) if box else None,
-                                source=str(raw.get("source", source_file))))
+                                source=str(raw.get("source", source_file)),
+                                mesh=raw.get("mesh") if isinstance(raw.get("mesh"), dict) else None))
     return Design(ship=_ship(d["ship"]), elements=elements, title=str(d.get("title", "")),
                   source_format=str(d.get("source_format", "json")), source_file=source_file,
                   expected=list(d.get("expected", [])), interpretation=dict(d.get("interpretation") or {}))

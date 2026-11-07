@@ -20,6 +20,8 @@ from pathlib import Path
 
 from .model import Design, DesignError, Element, design_from_dict
 
+MAX_TRIANGLES_PER_PART, MAX_TRIANGLES_TOTAL = 20000, 300000   # larger models fall back to boxes for the rest
+
 CLASS_MAP = {
     "IfcDoor": "door", "IfcStair": "stair", "IfcStairFlight": "stair", "IfcWall": "bulkhead",
     "IfcWallStandardCase": "bulkhead", "IfcRamp": "ramp", "IfcRampFlight": "ramp", "IfcEngine": "diesel_engine",
@@ -72,6 +74,7 @@ def design_from_ifc(path: Path, ship: dict | None = None) -> Design:
     settings = ifcopenshell.geom.settings()
     settings.set("use-world-coords", True)
     elements: list[dict] = []
+    mesh_budget = [MAX_TRIANGLES_TOTAL]
     for prod in f.by_type("IfcProduct"):
         if prod.is_a("IfcSpatialStructureElement") and not prod.is_a("IfcSpace"):
             continue
@@ -97,7 +100,7 @@ def design_from_ifc(path: Path, ship: dict | None = None) -> Design:
         if prod.is_a("IfcDoor") and getattr(prod, "OverallWidth", None):
             props.setdefault("overall_width", _value("overall_width", prod.OverallWidth * 1000
                                                      if prod.OverallWidth < 10 else prod.OverallWidth))
-        box = None
+        box, mesh = None, None
         if prod.Representation is not None:
             try:
                 shape = ifcopenshell.geom.create_shape(settings, prod)
@@ -105,11 +108,16 @@ def design_from_ifc(path: Path, ship: dict | None = None) -> Design:
                 xs, ys, zs = v[0::3], v[1::3], v[2::3]
                 box = (min(xs), min(ys), min(zs), max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
                 box = tuple(round(b, 4) for b in box)
+                tri = list(shape.geometry.faces)
+                if 0 < len(tri) <= 3 * MAX_TRIANGLES_PER_PART and mesh_budget[0] >= len(tri) // 3:
+                    mesh = {"v": [round(c, 3) for c in v], "f": tri}     # keep the real shape for the 3D viewer
+                    mesh_budget[0] -= len(tri) // 3
             except Exception:
                 box = None
         elements.append({"id": rt.get("Id") or prod.Tag or prod.GlobalId, "type": etype,
                          "name": prod.Name or "", "deck": rt.get("Deck", ""), "zone": rt.get("Zone", ""),
-                         "props": props, "box": list(box) if box else None, "source": f"IFC {prod.GlobalId}"})
+                         "props": props, "box": list(box) if box else None, "source": f"IFC {prod.GlobalId}",
+                         **({"mesh": mesh} if mesh else {})})
     d = design_from_dict({"title": f"IFC model: {Path(path).name}", "ship": ship_d, "elements": elements,
                           "source_format": "ifc"}, source_file=Path(path).name)
     return d

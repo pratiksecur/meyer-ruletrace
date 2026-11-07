@@ -20,7 +20,9 @@ h2:first-child{margin-top:0}
 button,select,input{font:inherit}button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;cursor:pointer}
 button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button:disabled{opacity:.5}
 .list .it{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list .it:hover{background:var(--bg)}
-.list .it.sel{border-color:var(--teal);background:#e8f4f4}.small{font-size:12px}.muted{color:var(--muted)}
+.list .it.sel{border-color:var(--teal);background:#e8f4f4}
+.list .it{position:relative}.list .it .rm{position:absolute;top:6px;right:6px;border:0;background:transparent;color:var(--muted);font-size:16px;line-height:1;padding:2px 6px;border-radius:6px}
+.list .it .rm:hover{background:#fbeaea;color:var(--fail)}.list .it b{padding-right:22px;display:block}.small{font-size:12px}.muted{color:var(--muted)}
 #view{position:relative;min-height:0;min-width:0;overflow:hidden;background:#e9eef2}
 #view canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}
 @media(min-width:1101px){html,body{overflow:hidden}}aside{min-height:0}
@@ -44,6 +46,11 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button
 details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
 .areas label{display:block;font-size:13px}.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
 .toast.err{background:var(--fail)}
+#part{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fbfcfd}
+#part .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12.5px;margin-top:6px}#part .kv span{color:var(--muted)}
+#part .x{float:right;border:0;background:transparent;font-size:16px;color:var(--muted);cursor:pointer}
+#parts .grp{margin:8px 0 2px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+#parts .it{padding:4px 8px;display:flex;gap:6px;align-items:center}#legend label{cursor:pointer}
 .ai{border:1px solid #cfe0ef;background:#f3f8fc;border-radius:8px;padding:8px 10px;margin-top:8px;font-size:12.5px}
 .ai .lab{font-size:11px;color:var(--muted);margin-bottom:4px}.ai p{margin:3px 0}
 button.aib{font-size:12px;padding:4px 9px;margin-top:8px;border-color:#9cc3e0;color:#0b4f7c;background:#f3f8fc}
@@ -59,6 +66,7 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
   <span class="sp"></span>
   <label class="small" for="who">Signed in as</label>
   <select id="who"></select>
+  <a href="/ruletrace/rulesets/page">New rule sets</a>
   <a href="/ruletrace/dashboard">Dashboard</a>
 </header>
 <div class="wrap">
@@ -73,6 +81,7 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
     <h2>Ship profile</h2>
     <div id="ship" class="small muted">Select a design</div>
     <div id="interp" class="small" style="display:none"></div>
+    <details id="partsBox" style="display:none"><summary>All parts in this design</summary><div id="parts" class="list small"></div></details>
     <h2>Where will it operate?</h2>
     <div class="areas small" id="areas"></div>
     <label class="small" for="keel">Keel laid</label>
@@ -95,8 +104,10 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
       <button class="primary" id="tryDemo" style="width:100%;padding:9px">Try it: check the demo cruise ship</button></div></div>
     <div id="legend"><span><span class="dot" style="background:var(--fail)"></span>fails</span><span><span class="dot" style="background:var(--warn)"></span>warning</span>
       <span><span class="dot" style="background:var(--unknown)"></span>can't check</span><span><span class="dot" style="background:var(--pass)"></span>passes</span>
-      <span><span class="dot" style="background:#c4ccd4"></span>not checked</span></div></main>
+      <span><span class="dot" style="background:#c4ccd4"></span>not checked</span>
+      <label style="margin-left:6px"><input type="checkbox" id="detailed" checked> detailed shapes</label></div></main>
   <aside id="side2">
+    <div id="part" style="display:none"></div>
     <h2>Findings</h2>
     <div id="counts" class="counts"></div>
     <div class="filters" id="filters"></div>
@@ -110,6 +121,7 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "/ruletrace/static/OrbitControls.js";
+import { buildPart, label, dimension } from "/ruletrace/static/parts.js";
 
 const PEOPLE = [{label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
                 {label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
@@ -164,16 +176,7 @@ controls.addEventListener("change", () => dirty = true);
 (function loop(){ requestAnimationFrame(loop); if (controls.update() || dirty) { renderer.render(scene, camera); dirty = false; } })();
 new ResizeObserver(() => dirty = true).observe(view);
 
-// ship frame (x fwd, y stbd, z up) -> three (x, z, y)
-function placeBox(b, color, opts={}){
-  const [x,y,z,lx,wy,hz] = b;
-  const g = new THREE.BoxGeometry(Math.max(lx,0.05), Math.max(hz,0.05), Math.max(wy,0.05));
-  const m = new THREE.MeshStandardMaterial({color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthWrite: !opts.opacity,
-    polygonOffset: true, polygonOffsetFactor: opts.opacity ? 2 : 0, polygonOffsetUnits: opts.opacity ? 2 : 0});
-  const mesh = new THREE.Mesh(g, m); mesh.position.set(x + lx/2, z + hz/2, y + wy/2);
-  if (opts.edges) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color, transparent:true, opacity:.9})); mesh.add(e); }
-  group.add(mesh); return mesh;
-}
+// ship frame (x fwd, y stbd, z up) -> three (x, z, y). Each part is a detailed shape built from its real values (parts.js).
 function statusOf(id){
   if (!result) return "none";
   const fs = result.findings.filter(f => f.element_id === id || (f.highlight||[]).includes(id));
@@ -181,27 +184,19 @@ function statusOf(id){
   return "none";
 }
 function buildScene(){
-  scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear();
+  scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear(); annot = null;
   const ship = result.ship, L = ship.length_m || 100, B = ship.breadth_m || 20;
   const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(L, 1, B)), new THREE.LineBasicMaterial({color:0x7a8896}));
   outline.position.set(L/2, 0, 0); group.add(outline);
   const grid = new THREE.GridHelper(Math.max(L, B) * 1.2, 24, 0xb4bfca, 0xd3dae0); grid.position.set(L/2, -0.6, 0); group.add(grid);
+  const simple = !$("#detailed").checked;
   for (const el of result.elements) {
-    if (!el.box) continue;
-    const st = statusOf(el.id), zone = el.type === "fire_zone";
-    let mesh;
-    if (el.type === "nav_light") {
-      const [x,y,z,lx,wy,hz] = el.box;
-      mesh = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 14), new THREE.MeshStandardMaterial({color: COLORS[st]}));
-      mesh.position.set(x + lx/2, z + hz/2, y + wy/2); group.add(mesh);
-      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, z), new THREE.MeshStandardMaterial({color:0x8a96a3}));
-      mast.position.set(x + lx/2, z/2, y + wy/2); group.add(mast);
-    } else {
-      const b = zone ? [el.box[0] + .15, el.box[1] + .15, el.box[2] + .15, el.box[3] - .3, el.box[4] - .3, el.box[5] - .3] : el.box;
-      mesh = placeBox(b, COLORS[st], zone ? {opacity: st === "none" || st === "pass" ? .08 : .22, edges:true} : {edges: st === "fail"});
-      if (zone) mesh.renderOrder = 2;
-    }
-    mesh.userData = {id: el.id, el}; meshes.set(el.id, mesh);
+    if (!el.box && !el.mesh) continue;
+    const st = statusOf(el.id);
+    const { object, info } = buildPart(el, COLORS[st], st, simple);
+    object.userData = {id: el.id, el, info};
+    if (el.type === "fire_zone") object.renderOrder = 2;
+    group.add(object); meshes.set(el.id, object);
   }
   frame();
 }
@@ -209,25 +204,47 @@ function frame(id){
   const box = new THREE.Box3();
   if (id && meshes.get(id)) box.setFromObject(meshes.get(id)); else box.setFromObject(group);
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length() || 10;
-  const d = id ? Math.max(s * 3, 25) : s * 0.9;
+  const d = id ? Math.max(s * 2.2, 5) : s * 0.9;
   camera.position.set(c.x - d * .55, c.y + d * .55, c.z + d * .75); controls.target.copy(c); controls.update(); dirty = true;
 }
 function highlight(ids){
-  for (const [id, m] of meshes) {
+  for (const [id, obj] of meshes) {
     const on = ids.includes(id);
-    m.scale.setScalar(on ? 1.04 : 1);
-    m.material.emissive = new THREE.Color(on ? 0x331111 : 0x000000); dirty = true;
-    if (m.userData.el.type !== "fire_zone" && m.material) m.material.opacity = 1;
+    obj.traverse(o => { if (o.isMesh && o.material && "emissive" in o.material && o.material.emissiveIntensity !== 0.6)
+      o.material.emissive = new THREE.Color(on ? 0x3a1010 : 0x000000); });
   }
+  dirty = true;
+}
+// measurement shown on the model for the checked value: "880 mm · needs at least 900 mm"
+let annot = null;
+function annotate(f){
+  if (annot) { annot.parent?.remove(annot); annot = null; }
+  if (!f || !f.element_id) { dirty = true; return; }
+  const obj = meshes.get(f.element_id); if (!obj) return;
+  const info = obj.userData.info || {}, prop = (f.property || "");
+  const size = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3()).length() || 2;
+  const lw = Math.min(30, Math.max(0.9, size * 0.45));          // label width in metres, in proportion to the part
+  const text = `${f.actual ?? "not given"}${f.required ? " · needs " + f.required : ""}`;
+  const dim = /height$/.test(prop) && prop !== "threshold_height" && info.dim2 ? info.dim2 : (/sill|threshold/.test(prop) && info.dimSill?.axis ? info.dimSill : info.dim);
+  const col = f.status === "fail" ? 0xa12a2a : 0x16202a;
+  if (dim && dim.axis && ["x","y","z"].includes(dim.axis) && dim.to - dim.from > 0.001) {
+    const [p, q] = dim.at, ab = { x: [[dim.from, p, q], [dim.to, p, q]], y: [[p, dim.from, q], [p, dim.to, q]], z: [[p, q, dim.from], [p, q, dim.to]] }[dim.axis];
+    annot = dimension(ab[0], ab[1], text, col, lw); obj.add(annot);
+  } else {
+    const b = new THREE.Box3().setFromObject(obj), top = b.getCenter(new THREE.Vector3()); top.y = b.max.y + size * 0.08;
+    annot = label(text, { width: lw, bg: f.status === "fail" ? "rgba(161,42,42,0.92)" : undefined }); annot.position.copy(top); scene.add(annot);
+  }
+  dirty = true;
 }
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 function pick(ev){
   const r = renderer.domElement.getBoundingClientRect();
   mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const hits = ray.intersectObjects([...meshes.values()], false);
-  const pref = hits.find(h => h.object.userData.el.type !== "fire_zone") || hits[0];
-  return pref ? pref.object.userData : null;
+  const owner = o => { while (o && !o.userData?.id) o = o.parent; return o; };
+  const hits = ray.intersectObjects([...meshes.values()], true).map(h => owner(h.object)).filter(Boolean);
+  const pref = hits.find(o => o.userData.el.type !== "fire_zone") || hits[0];
+  return pref ? pref.userData : null;
 }
 renderer.domElement.addEventListener("mousemove", ev => {
   const u = pick(ev), h = $("#hover");
@@ -241,6 +258,7 @@ renderer.domElement.addEventListener("click", ev => {
   const f = result.findings.find(f => (f.element_id === u.id || (f.highlight||[]).includes(u.id)) && f.status !== "pass")
          || result.findings.find(f => f.element_id === u.id);
   if (f) { filter = "all"; renderFindings(); select(result.findings.indexOf(f)); }
+  else selectPart(u.id);
 });
 const statusLabel = s => ({fail:"fails", warn:"warning", unknown:"can't check", pass:"passes", none:"not checked"}[s]);
 
@@ -251,12 +269,78 @@ async function boot(){
   document.querySelectorAll("[data-sample]").forEach(e => e.onclick = guard(async () => {
     const d = await api(`/ruletrace/designs/sample/${e.dataset.sample}`, {method:"POST"}); toast("Sample loaded"); await boot(); await open(d.id); }));
   $("#designs").innerHTML = designs.length ? designs.map(d => `<div class="it ${current===d.id?"sel":""}" data-id="${esc(d.id)}">
-      <b>${esc(d.title || d.filename)}</b><div class="muted">${esc(d.format)} · ${d.elements} elements</div></div>`).join("")
+      <b>${esc(d.title || d.filename)}</b><div class="muted">${esc(d.format)} · ${d.elements} elements</div>
+      <button class="rm" data-rm="${esc(d.id)}" title="Remove this design" aria-label="Remove ${esc(d.title || d.filename)}">×</button></div>`).join("")
+      + (designs.length > 1 ? `<div style="text-align:right;margin-top:2px"><a href="#" id="rmAll" class="muted small">Remove all designs</a></div>` : "")
     : `<div class="muted">No designs yet. Load a sample below or upload a model.</div>`;
   document.querySelectorAll("[data-id]").forEach(e => e.onclick = guard(() => open(e.dataset.id)));
+  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = guard(async ev => {
+    ev.stopPropagation();
+    const d = designs.find(x => x.id === b.dataset.rm);
+    if (!confirm(`Remove "${d.title || d.filename}" from RuleTrace?\nIts past checks stay in the check history.`)) return;
+    await api(`/ruletrace/designs/${d.id}`, {method:"DELETE"});
+    if (current === d.id) clearView();
+    toast("Design removed"); await boot();
+  }));
+  if ($("#rmAll")) $("#rmAll").onclick = guard(async ev => {
+    ev.preventDefault();
+    if (!confirm(`Remove all ${designs.length} designs from RuleTrace?\nTheir past checks stay in the check history.`)) return;
+    for (const d of designs) await api(`/ruletrace/designs/${d.id}`, {method:"DELETE"});
+    clearView(); toast("All designs removed"); await boot();
+  });
   if (!designs.length && samples.length) $("#napp").open = false;
   const want = (location.hash.match(/design=([a-z0-9-]+)/) || [])[1];
   if (want && want !== current && designs.some(d => d.id === want)) { history.replaceState(null, "", location.pathname); await open(want); }
+}
+// ---------- every part, in detail ----------
+const TYPE_NAMES = {stair:"Stairs", corridor:"Corridors", door:"Doors", weather_door:"Weathertight doors", ramp:"Ramps", ventilator:"Ventilators",
+  air_pipe:"Air pipes", guard_rail:"Guard rails", cabin:"Cabins", hospital:"Hospital", space:"Other spaces", bulkhead:"Bulkheads",
+  double_bottom:"Double bottom", fire_zone:"Main vertical zones", nav_light:"Navigation lights", diesel_engine:"Engines",
+  low_location_lighting:"Low-location lighting", declaration:"Statements on the drawing", persons_statement:"Statements on the drawing"};
+const human = k => k.replace(/^geom\./, "").replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+function selectPart(id){
+  highlight([id]); frame(id); renderPart(id);
+  const f = result.findings.find(x => x.element_id === id && x.status !== "pass"); annotate(f || null);
+}
+function renderPart(id){
+  const el = result.elements.find(e => e.id === id), box = $("#part");
+  if (!el) { box.style.display = "none"; return; }
+  const fs = result.findings.map((f, i) => [f, i]).filter(([f]) => f.element_id === id || (f.highlight || []).includes(id));
+  const b = el.box;
+  const geo = b ? [["Size (L × W × H)", `${b[3].toFixed(2)} × ${b[4].toFixed(2)} × ${b[5].toFixed(2)} m`],
+                   ["Position (x, y, z)", `${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)} m`]] : [];
+  const rows = [["Kind", (TYPE_NAMES[el.type] || human(el.type)).replace(/s$/, "")], ["ID", el.id], ...(el.deck ? [["Deck", el.deck]] : []),
+    ...(el.zone ? [["Zone", el.zone]] : []), ...geo, ...Object.entries(el.props || {}).map(([k, v]) => [human(k), v === true ? "yes" : v === false ? "no" : v]),
+    ...(el.source ? [["Read from", el.source]] : []), ...(el.mesh ? [["3D shape", `the model's own geometry (${el.mesh.f.length / 3} triangles)`]] : [])];
+  box.style.display = "";
+  box.innerHTML = `<button class="x" title="Close">×</button><b>${esc(el.name || el.id)}</b>
+    <div class="kv">${rows.map(([k, v]) => `<span>${esc(k)}</span><b style="font-weight:500">${esc(v)}</b>`).join("")}</div>
+    <div style="margin-top:8px" class="small"><b>Checks on this part (${fs.length})</b>${fs.length ? fs.map(([f, i]) =>
+      `<div style="margin-top:3px;cursor:pointer" data-fi="${i}"><span class="pill ${f.status}">${statusLabel(f.status)}</span> ${esc(f.title)}</div>`).join("")
+      : `<div class="muted">No rule applies to this part on this ship.</div>`}</div>`;
+  box.querySelector(".x").onclick = () => { box.style.display = "none"; highlight([]); annotate(null); };
+  box.querySelectorAll("[data-fi]").forEach(e => e.onclick = () => { filter = "all"; renderFindings(); select(+e.dataset.fi); });
+}
+function renderPartsList(){
+  const els = result.elements;
+  const groups = {};
+  for (const e of els) (groups[e.type] = groups[e.type] || []).push(e);
+  $("#partsBox").style.display = els.length ? "" : "none";
+  $("#partsBox").querySelector("summary").textContent = `All parts in this design (${els.length})`;
+  $("#parts").innerHTML = Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([t, list]) =>
+    `<div class="grp">${esc(TYPE_NAMES[t] || human(t))} (${list.length})</div>` + list.map(e => { const st = statusOf(e.id);
+      return `<div class="it" data-part="${esc(e.id)}"><span class="dot" style="background:${st === "none" ? "#c4ccd4" : "var(--" + st + ")"}"></span>${esc(e.name || e.id)}</div>`; }).join("")).join("");
+  document.querySelectorAll("[data-part]").forEach(e => e.onclick = () => { if (meshes.get(e.dataset.part)) selectPart(e.dataset.part); else renderPart(e.dataset.part); });
+}
+$("#detailed").onchange = () => { if (result) { buildScene(); if (selected !== null) select(selected); } };
+function clearView(){
+  current = null; result = null; selected = null; aiCache.clear();
+  scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear(); dirty = true;
+  $("#counts").innerHTML = ""; $("#filters").innerHTML = ""; $("#na").innerHTML = ""; $("#meta").innerHTML = "";
+  $("#findings").innerHTML = `<div class="muted">Select or upload a design.</div>`;
+  $("#ship").className = "small muted"; $("#ship").textContent = "Select a design"; $("#interp").style.display = "none";
+  $("#part").style.display = "none"; $("#partsBox").style.display = "none"; annot = null;
+  $("#start").style.display = "";
 }
 async function open(id, overrides){
   current = id; aiCache.clear();
@@ -281,7 +365,7 @@ async function open(id, overrides){
   }
   document.querySelectorAll("#areas input").forEach(i => i.checked = (s.operating_areas || []).includes(i.value));
   $("#keel").value = s.keel_laid || "";
-  buildScene(); renderFindings();
+  buildScene(); renderFindings(); renderPartsList(); $("#part").style.display = "none";
   $("#start").style.display = "none";
   $("#meta").innerHTML = `<span title="design ${esc(result.design_sha256)} · rule pack ${esc(result.rules_sha256)}">Saved in the check history as #${result.audit_seq}</span>`
     + (Object.keys(result.what_if||{}).length ? `<br>What-if: ${esc(JSON.stringify(result.what_if))}` : "");
@@ -317,7 +401,7 @@ function detail(f){
 function select(i){
   selected = i; renderFindings();
   const f = result.findings[i], ids = [f.element_id, ...(f.highlight||[])].filter(Boolean);
-  highlight(ids); frame(ids[0]);
+  highlight(ids); frame(ids[0]); annotate(f); renderPart(f.element_id);
   document.querySelector(`.f[data-i="${i}"]`)?.scrollIntoView({block:"nearest"});
 }
 $("#recheck").onclick = guard(async () => {

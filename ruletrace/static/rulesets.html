@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuleTrace · new rule sets</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#16202a;--muted:#5d6975;--line:#dde3e8;--navy:#0b2545;--teal:#138a8a;
+--fail:#d64545;--warn:#d88b16;--unknown:#6b7c93;--pass:#2e8b57;--r:10px}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--navy);color:#fff;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:600}header .sub{color:#b9c7d8;font-size:12px}header .sp{flex:1}
+header a{color:#cfe3ff;font-size:13px}header select{font:inherit;border-radius:6px;border:0;padding:4px 6px}
+main{max-width:1240px;margin:0 auto;padding:18px 16px 40px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:14px}
+.grid{display:grid;gap:14px}.g2{grid-template-columns:1.3fr 1fr}@media(max-width:900px){.g2{grid-template-columns:1fr}}
+.muted{color:var(--muted)}.small{font-size:12px}
+button,input,select{font:inherit}button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 12px;cursor:pointer}
+button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button:disabled{opacity:.5}
+label.row{display:flex;gap:8px;align-items:center;margin:8px 0}
+input[type=text]{border:1px solid var(--line);border-radius:7px;padding:6px 8px;width:100%}
+.list .it{padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list .it:hover{background:var(--bg)}
+.list .it.sel{border-color:var(--teal);background:#e8f4f4}
+.banner{border-radius:var(--r);padding:12px 16px;margin-bottom:14px;font-size:16px;font-weight:600}
+.banner.flaw{background:#fbeaea;color:#a12a2a}.banner.gap{background:#fdf3e3;color:#8a5a0b}.banner.ok{background:#e8f5ee;color:#1d6b43}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}@media(max-width:900px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}.tile b{display:block;font-size:24px}.tile span{color:var(--muted);font-size:12.5px}
+.pill{font-size:11px;border-radius:999px;padding:2px 8px;color:#fff;white-space:nowrap;display:inline-block}
+.pill.ok{background:var(--pass)}.pill.flaw{background:var(--fail)}.pill.warn{background:var(--warn)}.pill.gap{background:var(--unknown)}.pill.info{background:#8da9c4}
+.r{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px}
+.r .h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.r .t{font-weight:600;flex:1}
+.quote{border-left:3px solid var(--line);padding:3px 8px;margin:6px 0;color:#384552;font-style:italic;font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid var(--line)}.num{text-align:right;font-variant-numeric:tabular-nums}
+.c-fail{color:var(--fail)}.c-warn{color:var(--warn)}.c-unknown{color:var(--unknown)}
+.filters{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}.filters button{padding:3px 9px;font-size:12px}.filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.stack{display:flex;gap:2px;height:26px;border-radius:6px;overflow:hidden;margin:6px 0 8px}.stack div{height:100%}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.cmp{display:grid;grid-template-columns:210px 1fr;gap:4px 14px;align-items:center}.cmp .lab{font-size:12.5px}.cmp .lab b{display:block;font-size:13px}
+.cmp svg{width:100%;height:auto;overflow:visible;display:block}.cmp .row{border-bottom:1px solid var(--line);padding:6px 0}
+svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif}
+.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}.toast.err{background:var(--fail)}
+</style>
+</head>
+<body>
+<header>
+  <h1>RuleTrace</h1><span class="sub">New rule sets: will a new set of requirements work, and what is wrong with it?</span>
+  <span class="sp"></span>
+  <label class="small" for="who">Signed in as</label><select id="who"></select>
+  <a href="/ruletrace">3D design check</a><a href="/ruletrace/dashboard">Dashboard</a>
+</header>
+<main>
+  <div class="grid g2">
+    <div class="card"><h2>Add a rule set</h2>
+      <div class="small muted" style="margin-bottom:8px">A company, owner, class or flag requirement document: PDF, Word, text, Markdown, HTML, or RuleTrace YAML.
+        RuleTrace turns every measurable "shall" into a draft check and tests it on your designs next to today's rules. Nothing is added to the live rules.</div>
+      <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.html,.htm,.yaml,.yml" aria-label="Rule document">
+      <input type="text" id="name" placeholder="Name, e.g. Owner design standard rev. A" style="margin-top:8px">
+      <label class="row small"><input type="checkbox" id="ai"> Also ask the AI helper about sentences the rules can't read (needs Ollama)</label>
+      <button class="primary" id="up">Read and analyse</button>
+      <span class="small muted" style="margin-left:8px">or <a href="#" id="sample">try the sample owner's standard</a> (it has deliberate flaws)</span>
+    </div>
+    <div class="card"><h2>Rule sets</h2><div id="list" class="list small"><div class="muted">None yet.</div></div></div>
+  </div>
+  <div id="report"></div>
+</main>
+<div id="toast" class="toast"></div>
+<script>
+const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"}, {label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+                {label:"Ella · admin", user:"ella", roles:"admin"}];
+const KIND = {ok:"Works", flaw:"Flaw", warn:"Weaker", gap:"Can't test", info:"Duplicate"};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+PEOPLE.forEach((p,i) => $("#who").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p.label)}</option>`));
+$("#who").value = store.get("ruletrace.rs.who") || "0";
+$("#who").onchange = () => { store.set("ruletrace.rs.who", $("#who").value); loadList(); };
+const headers = () => { const p = PEOPLE[+$("#who").value]; return {"X-User":p.user, "X-Roles":p.roles, "X-User-Kind":"human"}; };
+async function api(path, opts={}){
+  const r = await fetch(path, {...opts, headers: headers()});
+  const d = r.headers.get("content-type")?.includes("json") ? await r.json().catch(() => ({})) : await r.text();
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `HTTP ${r.status}`);
+  return d;
+}
+function toast(m, err){ const t=$("#toast"); t.textContent=m; t.className="toast"+(err?" err":""); t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none", err?6000:2500); }
+let R = null, filter = "all", current = null;
+
+async function loadList(){
+  try {
+    const d = await api("/ruletrace/rulesets");
+    $("#list").innerHTML = d.rulesets.length ? d.rulesets.map(r => `<div class="it ${current===r.id?"sel":""}" data-id="${esc(r.id)}"><b>${esc(r.name)}</b>
+      <div class="muted">${esc(r.filename)} · ${r.rules} draft rules · ${r.manual} for an engineer</div></div>`).join("") : `<div class="muted">None yet.</div>`;
+    document.querySelectorAll("[data-id]").forEach(e => e.onclick = () => open(e.dataset.id));
+  } catch(e){ $("#list").innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+}
+async function open(id){ busy(true); try { show(await api(`/ruletrace/rulesets/${id}`)); } catch(e){ toast(e.message, true) } busy(false); }
+function busy(on){ $("#up").disabled = on; $("#up").textContent = on ? "Reading…" : "Read and analyse"; }
+function show(r){
+  R = r; current = r.id; filter = "all"; loadList(); render();
+  $("#report").scrollIntoView({behavior:"smooth", block:"start"});
+}
+const COL = {ok:"var(--pass)", flaw:"var(--fail)", warn:"var(--warn)", gap:"var(--unknown)", info:"#8da9c4"};
+const ORDER = ["flaw","warn","info","gap","ok"];
+function charts(r){
+  const n = r.verdicts.length; if (!n) return "";
+  const stack = ORDER.filter(k => r.counts[k]).map(k => `<div style="flex:${r.counts[k]};background:${COL[k]}" title="${KIND[k]}: ${r.counts[k]} rule(s)"></div>`).join("");
+  const legend = ORDER.filter(k => r.counts[k]).map(k => `<span><i style="background:${COL[k]}"></i>${KIND[k]} ${r.counts[k]}</span>`).join("");
+  const rows = r.verdicts.filter(v => v.limit && v.compare && v.compare.length);
+  const dmax = Math.max(1, ...r.designs.map(d => Math.max(d.hidden, d.extra_issues)));
+  const bar = (v, col, label) => `<div style="display:flex;align-items:center;gap:6px;height:14px"><div style="width:${v ? Math.max(3, 100 * v / dmax) : 0}%;height:12px;background:${col};border-radius:0 4px 4px 0"
+      title="${label}: ${v}"></div><span class="small">${v}</span></div>`;
+  return `<div class="card"><h2>Graphical analysis</h2>
+    <div style="font-weight:600;margin-bottom:6px">How the ${n} new rules came out</div>
+    ${pie(r.counts, n)}
+    ${rows.length ? `<div style="margin:20px 0 8px;font-weight:600">New rule compared with today's rule</div>
+      ${rows.map(compareRow).join("")}` : ""}
+    <div style="margin:20px 0 8px;font-weight:600">What changes for each design</div>
+    <div class="legend" style="margin-bottom:6px"><span><i style="background:var(--fail)"></i>problems today's rules catch that would get through</span><span><i style="background:var(--warn)"></i>new problems to fix</span></div>
+    <div class="cmp">${r.designs.filter(d => d.hidden || d.extra_issues).map(d => `<div class="lab row">${esc(d.design)}</div><div class="row">${bar(d.hidden, "var(--fail)", "Problems that would get through")}<div style="height:4px"></div>${bar(d.extra_issues, "var(--warn)", "New problems to fix")}</div>`).join("")}</div>
+    ${r.designs.some(d => !d.hidden && !d.extra_issues) ? `<div class="small muted" style="margin-top:6px">No change for: ${r.designs.filter(d => !d.hidden && !d.extra_issues).map(d => esc(d.design)).join(", ")}</div>` : ""}
+  </div>`;
+}
+const MEANS = {flaw:"conflicts, weaker than today, or broken", warn:"weaker, but no design affected yet", info:"same as a rule we already have",
+               gap:"can't be tested on these designs", ok:"checks the designs and gives clear results"};
+function pie(counts, n){
+  const R = 70, r0 = 42, cx = 80, cy = 80, parts = ORDER.filter(k => counts[k]);
+  let a0 = -Math.PI / 2;
+  const pt = (a, rad) => `${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`;
+  const slices = parts.map(k => {
+    const a1 = a0 + 2 * Math.PI * counts[k] / n, big = a1 - a0 > Math.PI ? 1 : 0;
+    const d = parts.length === 1
+      ? `M ${pt(-Math.PI / 2, R)} A ${R} ${R} 0 1 1 ${pt(-Math.PI / 2 - 0.0001, R)} L ${pt(-Math.PI / 2 - 0.0001, r0)} A ${r0} ${r0} 0 1 0 ${pt(-Math.PI / 2, r0)} Z`
+      : `M ${pt(a0, R)} A ${R} ${R} 0 ${big} 1 ${pt(a1, R)} L ${pt(a1, r0)} A ${r0} ${r0} 0 ${big} 0 ${pt(a0, r0)} Z`;
+    const mid = (a0 + a1) / 2, label = counts[k] / n >= 0.08 ? `<text x="${cx + 56 * Math.cos(mid)}" y="${cy + 56 * Math.sin(mid) + 4}" text-anchor="middle" fill="#fff" font-weight="700" font-size="13">${counts[k]}</text>` : "";
+    a0 = a1;
+    return `<path d="${d}" fill="${COL[k]}" stroke="#fff" stroke-width="2"><title>${KIND[k]}: ${counts[k]} of ${n} rules</title></path>${label}`;
+  }).join("");
+  const legend = parts.map(k => `<div style="display:grid;grid-template-columns:14px 34px 1fr;gap:8px;align-items:baseline;margin:5px 0">
+      <i style="width:12px;height:12px;border-radius:3px;background:${COL[k]};display:inline-block"></i>
+      <b style="font-size:16px">${counts[k]}</b><span><b>${KIND[k]}</b> <span class="muted">(${Math.round(100 * counts[k] / n)}%): ${MEANS[k]}</span></span></div>`).join("");
+  return `<div style="display:flex;gap:26px;align-items:center;flex-wrap:wrap">
+    <svg viewBox="0 0 160 160" width="170" height="170" role="img" aria-label="${parts.map(k => KIND[k] + " " + counts[k]).join(", ")}">${slices}
+      <text x="80" y="78" text-anchor="middle" font-size="24" font-weight="700" fill="#16202a">${n}</text>
+      <text x="80" y="96" text-anchor="middle" font-size="11" fill="#5d6975">new rules</text></svg>
+    <div style="flex:1;min-width:260px">${legend}</div></div>`;
+}
+function compareRow(v){
+  const words = L => L.unit === "1:N" ? (L.op.startsWith("<") ? "no steeper than " : "at least ") + L.label
+                                      : (L.op.startsWith("<") ? "at most " : L.op === "==" ? "exactly " : "at least ") + L.label;
+  const size = L => L.unit === "1:N" ? 100 / L.value : L.base;   // slopes: a steeper slope is a longer bar
+  // one "Today" bar: the current rule that matters most here (the one it conflicts with, else the strictest)
+  const cur = v.compare.filter(c => !c.new_rule), other = v.compare.filter(c => c.new_rule).slice(0, 1);
+  const strict = (p, q) => (p.op.startsWith("<") ? size(p) - size(q) : size(q) - size(p));
+  const pick = cur.filter(c => c.relation === "conflict").sort(strict)[0] || [...cur].sort(strict)[0];
+  const today = pick ? [pick] : [];
+  const more = cur.length - today.length;
+  const shown = [...today, ...other];
+  const max = Math.max(size(v.limit), ...shown.map(size)) * 1.08;
+  const rel = v.compare.find(c => c.relation === "conflict") ? "conflict" : (v.compare.find(c => c.relation === "looser") ? "looser"
+            : v.compare.find(c => c.relation === "stricter") ? "stricter" : "same");
+  const say = {conflict: `<b style="color:var(--fail)">Contradicts ${other.length && !today.some(c => c.relation === "conflict") ? "another new rule" : "today's rule"}:</b> no design can meet both.`,
+               looser: `<b style="color:var(--fail)">Weaker than today:</b> ${v.hides.length ? `${v.hides.length} problem(s) would get through.` : "no current design is affected yet."}`,
+               stricter: `<b style="color:var(--warn)">Stricter than today:</b> ${v.new_issues.length} new problem(s) to fix.`,
+               same: `<b style="color:var(--muted)">Same as today's rule.</b>`}[rel];
+  const line = (who, L, col, bold, src) => `<div style="display:grid;grid-template-columns:190px 1fr 170px;gap:10px;align-items:center;margin:3px 0">
+      <span class="small ${bold ? "" : "muted"}">${who}${src ? `<br><span class="muted" style="font-size:11px">${esc(src)}</span>` : ""}</span>
+      <div style="height:14px;background:var(--bg);border-radius:4px"><div style="width:${100 * size(L) / max}%;height:100%;background:${col};border-radius:4px"></div></div>
+      <span class="small" style="${bold ? "font-weight:600" : ""}">${esc(words(L))}</span></div>`;
+  return `<div class="r"><div class="h"><span class="t">${esc(v.title)}</span><span class="pill ${v.kind}">${KIND[v.kind]}</span></div>
+    ${today.map(c => line("Today", c, "#9aa6b2", false, c.rule)).join("")}
+    ${other.map(c => line("Other new rule", c, "#9aa6b2", false, c.rule)).join("")}
+    ${line("New rule", v.limit, COL[v.kind], true, v.ref)}
+    <div class="small" style="margin-top:4px">${say}${more ? ` <span class="muted">(Also checked today by ${more} other rule${more > 1 ? "s" : ""}; the strictest is shown.)</span>` : ""}</div></div>`;
+}
+function render(){
+  const r = R, c = r.counts, state = c.flaw ? "flaw" : (c.gap || c.warn ? "gap" : "ok");
+  const vs = r.verdicts.filter(v => filter === "all" || v.kind === filter);
+  $("#report").innerHTML = `
+  <div class="banner ${state}">${esc(r.name)}: ${esc(r.overall)}</div>
+  <div class="tiles">
+    <div class="tile"><b style="color:var(--pass)">${c.ok}</b><span>rules work on the designs</span></div>
+    <div class="tile"><b style="color:var(--fail)">${c.flaw}</b><span>flaws: conflicts, weaker than today, broken</span></div>
+    <div class="tile"><b style="color:var(--warn)">${c.warn + c.info}</b><span>weaker without effect, or duplicates</span></div>
+    <div class="tile"><b style="color:var(--unknown)">${c.gap}</b><span>can't be tested on these designs</span></div>
+    <div class="tile"><b>${r.manual_items.length}</b><span>sentences an engineer must turn into checks</span></div>
+  </div>
+  ${charts(r)}
+  <div class="grid g2">
+    <div class="card"><h2>Each new rule: does it work?</h2>
+      <div class="filters">${[["all","All"],["flaw","Flaws"],["warn","Weaker"],["gap","Can't test"],["info","Duplicates"],["ok","Works"]]
+        .map(([k,l]) => `<button data-f="${k}" class="${filter===k?"on":""}">${l}</button>`).join("")}</div>
+      ${vs.length ? vs.map(v => `<div class="r"><div class="h"><span class="t">${esc(v.title || v.id)}</span><span class="pill ${v.kind}">${KIND[v.kind]}</span></div>
+        <div class="small muted">${esc(v.ref || "")}${v.requirement ? " · " + esc(v.requirement) : ""}${v.extracted_by && v.extracted_by !== "rules" ? " · drafted by " + esc(v.extracted_by) : ""}</div>
+        <div style="margin-top:4px">${esc(v.verdict)}</div>
+        ${v.quote ? `<div class="quote">"${esc(v.quote)}"</div>` : ""}
+        ${v.hides && v.hides.length ? `<div class="small c-fail">Would pass: ${v.hides.map(h => esc(h.element) + " (" + esc(h.design) + ")").join("; ")}</div>` : ""}
+        ${v.new_issues && v.new_issues.length ? `<div class="small c-warn">New issues: ${v.new_issues.map(h => esc(h.element) + " (" + esc(h.design) + ")").join("; ")}</div>` : ""}
+      </div>`).join("") : `<div class="muted">Nothing in this filter.</div>`}
+    </div>
+    <div>
+      <div class="card"><h2>Effect on the designs</h2>
+        <div class="small muted" style="margin-bottom:6px">Tested on ${esc(r.designs_source)}.</div>
+        <table><thead><tr><th>Design</th><th class="num">Fails under new rules</th><th class="num">Issues it would hide</th><th class="num">New issues</th></tr></thead>
+        <tbody>${r.designs.map(d => `<tr><td>${esc(d.design)}</td><td class="num">${d.new_fail}</td><td class="num ${d.hidden?"c-fail":""}">${d.hidden}</td>
+          <td class="num ${d.extra_issues?"c-warn":""}">${d.extra_issues}</td></tr>`).join("")}</tbody></table>
+      </div>
+      <div class="card"><h2>For an engineer: sentences RuleTrace can't check yet</h2>
+        ${r.manual_items.length ? r.manual_items.map(m => `<div style="margin-bottom:8px"><div class="small"><b>${esc(m.ref)}</b> <span class="muted">${esc(m.reason)}</span></div>
+          <div class="quote">"${esc(m.text)}"</div></div>`).join("") : `<div class="muted">None: every requirement became a check.</div>`}
+        ${(r.notes||[]).map(n => `<div class="small muted">${esc(n)}</div>`).join("")}
+      </div>
+      <div class="card"><h2>Next step</h2>
+        <div class="small" style="margin-bottom:8px">Fix the flaws in the source document, re-upload it, then check each draft rule against the official text before it joins the rule pack.</div>
+        <button id="yaml">Download draft rules (YAML)</button> <button id="del">Remove this rule set</button>
+      </div>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter = b.dataset.f; render(); });
+  $("#yaml").onclick = async () => { try { const t = await api(`/ruletrace/rulesets/${r.id}/yaml`), a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([t], {type:"text/yaml"})); a.download = `${r.name.replace(/\W+/g, "_")}_draft_rules.yaml`; a.click(); } catch(e){ toast(e.message, true) } };
+  $("#del").onclick = async () => { if (!confirm("Remove this rule set? Its analyses stay in the audit record.")) return;
+    try { await api(`/ruletrace/rulesets/${r.id}`, {method:"DELETE"}); $("#report").innerHTML = ""; current = null; loadList(); } catch(e){ toast(e.message, true) } };
+}
+$("#up").onclick = async () => {
+  const f = $("#file").files[0]; if (!f) return toast("Choose a rule document first", true);
+  const fd = new FormData(); fd.append("file", f); fd.append("name", $("#name").value); fd.append("use_ai", $("#ai").checked ? "true" : "false");
+  busy(true); try { show(await api("/ruletrace/rulesets", {method:"POST", body: fd})); $("#file").value = ""; } catch(e){ toast(e.message, true) } busy(false);
+};
+$("#sample").onclick = async ev => { ev.preventDefault(); busy(true);
+  try { show(await api("/ruletrace/rulesets/sample/demo_owner_spec", {method:"POST"})); } catch(e){ toast(e.message, true) } busy(false); };
+loadList();
+</script>
+</body>
+</html>

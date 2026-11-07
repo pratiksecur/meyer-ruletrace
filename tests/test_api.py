@@ -42,3 +42,17 @@ def test_rejections(client):
     did = client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
     assert client.post(f"/ruletrace/designs/{did}/check", headers=ENG,
                        json={"ship_overrides": {"elements": []}}).status_code == 400
+
+
+def test_check_result_carries_part_details(client):
+    import pytest
+    did = client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
+    r = client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={}).json()
+    el = next(e for e in r["elements"] if e["type"] == "stair")
+    assert el["props"]["clear_width"] and el["box"] and "source" in el
+    assert all("property" in f for f in r["findings"])          # the viewer draws the checked dimension
+    pytest.importorskip("ifcopenshell")
+    did = client.post("/ruletrace/designs/sample/demo_deck_section", headers=ENG).json()["id"]
+    r = client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={}).json()
+    assert any(e.get("mesh") and e["mesh"]["f"] for e in r["elements"])  # the IFC model's own triangles
+    assert client.get("/ruletrace/static/parts.js").status_code == 200
