@@ -28,6 +28,17 @@ def checked_entries(session) -> list[AuditEntry]:
     return list(session.scalars(q))
 
 
+AI_AND_CHECK_ACTIONS = ("design.checked", "design.explained", "design.fixes_suggested", "design.whatif",
+                        "rule.drafted", "assistant.asked", "ruleset.analysed")
+
+
+def activity_entries(session) -> list[dict]:
+    """Design checks and AI actions from the audit chain as plain dicts, oldest first (for the posture view)."""
+    q = select(AuditEntry).where(AuditEntry.action.in_(AI_AND_CHECK_ACTIONS)).order_by(AuditEntry.seq)
+    return [{"seq": e.seq, "ts": e.ts, "actor": e.actor, "action": e.action, "payload": e.payload or {}}
+            for e in session.scalars(q)]
+
+
 def _design_meta(store: Path, design_id: str) -> dict | None:
     p = store / f"{design_id}.json"
     if not p.exists():

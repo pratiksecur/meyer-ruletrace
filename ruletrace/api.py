@@ -9,6 +9,7 @@
     POST /ruletrace/designs/{id}/check  run the rules (optionally with ship-profile "what-if" overrides)
     GET  /ruletrace/dashboard           dashboard page: engineer view and executive view, by role
     GET  /ruletrace/summary             dashboard data, built from the recorded design checks
+    GET  /ruletrace/posture             organisation-wide compliance posture (CISO / compliance lead, engineers)
     GET  /ruletrace/audit               every design check with its hash-chain fields (engineer view)
 
 Designs are stored as normalised JSON under VARTIJA_UPLOAD_DIR/ruletrace (git-ignored).
@@ -33,9 +34,10 @@ from vartija_core import audit
 import yaml
 from vartija_core.api import Principal, current_principal
 
-from .dashboard import build_summary, checked_entries
+from .dashboard import activity_entries, build_summary, checked_entries
 from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
+from .posture import build_posture
 
 STATIC = Path(__file__).parent / "static"
 SAMPLES = Path(__file__).parent / "samples"
@@ -47,10 +49,18 @@ class CheckIn(BaseModel):
                                  description="What-if changes to the ship profile, e.g. operating_areas, keel_laid")
 
 
+ACCESS_FILE = Path(__file__).parent / "access.yaml"
+VIEWS = ("engineer", "compliance", "executive")   # first match wins for a person with several roles
+
+
 def load_access(config_dir: Path) -> dict:
-    """Role -> view mapping (Vartija's config/access.yaml). Read here so RuleTrace uses no private Vartija API."""
+    """Role -> view mapping. Vartija's config/access.yaml first (read here so RuleTrace uses no private Vartija
+    API), then RuleTrace's own ruletrace/access.yaml, whose views replace the ones of the same name."""
     p = Path(config_dir) / "access.yaml"
-    return (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
+    access = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
+    own = yaml.safe_load(ACCESS_FILE.read_text(encoding="utf-8")) or {}
+    access["views"] = {**(access.get("views") or {}), **(own.get("views") or {})}
+    return access
 
 
 def _rules_sha(rules) -> str:
@@ -63,10 +73,25 @@ def make_router(app) -> APIRouter:
     access = load_access(settings.config_dir)
     router = APIRouter(prefix="/ruletrace", tags=["ruletrace"])
 
+    def view_of(who: Principal) -> str | None:
+        """engineer | compliance | executive, or None when the role has no access to RuleTrace."""
+        views = access.get("views") or {}
+        if who.kind != "human" or not any(views.get(v) for v in VIEWS):
+            return "engineer"                      # services, and a deployment with no role map, are not restricted
+        for v in VIEWS:
+            if set(who.roles) & set(views.get(v) or []):
+                return v
+        return None
+
     def engineer(who: Principal = Depends(current_principal)) -> Principal:
-        roles = (access.get("views") or {}).get("engineer")
-        if roles and who.kind == "human" and not (set(who.roles) & set(roles)):
+        if view_of(who) != "engineer":
             raise HTTPException(403, "your role does not have access to design checking")
+        return who
+
+    def oversight(who: Principal = Depends(current_principal)) -> Principal:
+        """Engineers and the compliance lead (CISO) may read the organisation posture and the audit record."""
+        if view_of(who) not in ("engineer", "compliance"):
+            raise HTTPException(403, "your role does not have access to the organisation posture and audit record")
         return who
 
     def _path(design_id: str) -> Path:
@@ -93,9 +118,7 @@ def make_router(app) -> APIRouter:
         return (STATIC / "index.html").read_text(encoding="utf-8")
 
     def any_view(who: Principal = Depends(current_principal)) -> Principal:
-        views = access.get("views") or {}
-        roles = set(views.get("engineer") or []) | set(views.get("executive") or [])
-        if roles and who.kind == "human" and not (set(who.roles) & roles):
+        if view_of(who) is None:
             raise HTTPException(403, "your role does not have access to the RuleTrace dashboard")
         return who
 
@@ -106,20 +129,28 @@ def make_router(app) -> APIRouter:
     @router.get("/summary")
     def summary(who: Principal = Depends(any_view)) -> dict:
         """Dashboard data, built from the design checks recorded in the audit chain."""
-        views = access.get("views") or {}
-        eng = not views.get("engineer") or who.kind != "human" or bool(set(who.roles) & set(views["engineer"]))
+        view = view_of(who)
         with app.state.session_factory() as s:
             out = build_summary(s, store, load_rules())
-        out["view"] = "engineer" if eng else "executive"
+        out["view"] = view
         out["me"] = {"name": who.name, "roles": list(who.roles)}
-        if not eng:  # executives get the plain summary, not the element-level findings or hashes
+        if view != "engineer":  # compliance and executive views get the plain summary, not element-level findings or hashes
             for d in out["designs"]:
                 d.pop("fails", None)
             out["activity"] = [{k: a[k] for k in ("ts", "actor", "file", "counts")} for a in out["activity"]]
         return out
 
+    @router.get("/posture")
+    def posture(who: Principal = Depends(oversight)) -> dict:
+        """Organisation-wide compliance posture for the CISO / compliance lead, from the recorded checks only."""
+        rs = load_rules()
+        with app.state.session_factory() as s:
+            out = build_posture(build_summary(s, store, rs), rs, activity_entries(s))
+        out["me"] = {"name": who.name, "roles": list(who.roles)}
+        return out
+
     @router.get("/audit")
-    def audit_record(who: Principal = Depends(engineer)) -> dict:
+    def audit_record(who: Principal = Depends(oversight)) -> dict:
         """Every design check with its hash-chain fields, for an auditor or class surveyor to keep."""
         with app.state.session_factory() as s:
             entries = checked_entries(s)

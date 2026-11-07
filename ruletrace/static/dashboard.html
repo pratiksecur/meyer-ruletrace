@@ -42,6 +42,13 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{
 .assume input{width:110px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;text-align:right}
 .toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
 .toast.err{background:var(--fail)}
+.lvl{font-size:30px;font-weight:800;letter-spacing:.02em;margin:4px 0}
+.lvl.at_risk{color:var(--fail)}.lvl.watch{color:var(--warn)}.lvl.clear{color:var(--pass)}.lvl.none{color:var(--unknown)}
+.sig{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:13.5px}.sig i{font-style:normal;width:16px;font-weight:700}
+.sig.bad i{color:var(--fail)}.sig.warn i{color:var(--warn)}.sig.good i{color:var(--pass)}
+.g4{grid-template-columns:repeat(4,1fr)}@media(max-width:900px){.g4{grid-template-columns:1fr}}
+.spark{display:flex;align-items:flex-end;gap:3px;height:70px;margin-top:6px}.spark i{flex:1;min-width:4px;background:var(--fail);border-radius:2px 2px 0 0}
+.sub2{margin:-4px 0 14px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -79,12 +86,17 @@ async function api(path, opts={}){
 function toast(m, err){ const t=$("#toast"); t.textContent=m; t.className="toast"+(err?" err":""); t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none", err?6000:2500); }
 const when = ts => { try { return new Date(ts).toLocaleString([], {dateStyle:"short", timeStyle:"short"}) } catch(e){ return ts } };
 const plain = r => PLAIN[r] || r;
-let S = null, V = null;
+let S = null, V = null, P = null;
 
 async function load(){
   try { S = await api("/ruletrace/summary"); }
   catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
   V = {...S.value};
+  if (S.view === "compliance") {
+    try { P = await api("/ruletrace/posture"); }
+    catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+    complianceView(); return;
+  }
   if (!S.designs.length) {
     $("#main").innerHTML = `<div class="card empty">No design has been checked yet.<br><br>
       <a href="/ruletrace">Open the 3D design check</a>, load a sample or upload a GA drawing / IFC model, and it will appear here.</div>`;
@@ -140,6 +152,72 @@ function bars(){
   if (!S.regimes.length) return `<div class="muted">No rule is broken.</div>`;
   const max = Math.max(...S.regimes.map(g => g.fail));
   return S.regimes.map(g => `<div class="bar" title="${esc(g.rules.map(r => r.title).join(" · "))}"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>`).join("");
+}
+// ---------------- compliance view (CISO / compliance lead): the whole organisation in one summary ----------------
+const cap = x => x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; };
+function complianceView(){
+  const k = P.kpis, r = P.rating, ai = P.ai, rp = P.rule_pack, c = P.chain || {};
+  const pct = v => v == null ? "–" : v + "%";
+  const sig = P.signals.length ? P.signals.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "✓" : x.level === "bad" ? "✗" : "!"}</i><span>${esc(x.text)}</span></div>`).join("")
+    : `<div class="muted">Nothing needs attention.</div>`;
+  const ships = P.ships.length ? `<table><thead><tr><th>Ship</th><th>Design</th><th>Result</th><th class="num">Major</th><th class="num">Minor</th><th class="num">Can't check</th><th>Checked</th></tr></thead><tbody>${
+    P.ships.map(d => `<tr><td><b>${esc(d.ship)}</b></td><td class="small muted">${esc(d.title)}</td><td><span class="pill ${esc(d.readiness)}">${esc(d.readiness_label)}</span></td>
+      <td class="num ${d.major ? "c-fail" : "muted"}"><b>${d.major}</b></td><td class="num ${d.minor ? "c-warn" : "muted"}">${d.minor}</td>
+      <td class="num ${d.unknown ? "c-unknown" : "muted"}">${d.unknown}</td><td class="small">${esc(when(d.checked_at))}<div class="muted">by ${esc(d.checked_by)}</div></td></tr>`).join("")}</tbody></table>`
+    : `<div class="muted">No design has been checked yet. Every ship design appears here as soon as an engineer checks it.</div>`;
+  const focus = P.focus.length ? P.focus.map(f => `<div class="ship"><b style="font-weight:500">${esc(f.ship)}</b><span class="small c-fail">${f.major} major</span><span class="small c-warn">${f.minor} minor</span></div>`).join("")
+    : `<div class="muted">No ship has open issues.</div>`;
+  const rec = P.recurring.length ? P.recurring.map(x => `<div class="ship" title="${esc(x.ref)}"><b style="font-weight:500">${esc(x.title)}<div class="small muted" style="font-weight:400">${esc(plain(x.regime))}</div></b>
+      <span class="small ${x.systemic ? "c-fail" : "muted"}">${x.systemic ? "on " + x.designs + " designs" : "1 design"}</span></div>`).join("")
+    : `<div class="muted">No rule is broken.</div>`;
+  const maxF = Math.max(1, ...P.trend.map(t => t.fail));
+  const trend = P.trend.length ? `<div class="spark">${P.trend.map(t => `<i title="${esc(t.file)} · ${t.fail} to fix · ${esc(when(t.ts))}" style="height:${Math.max(4, 100 * t.fail / maxF)}%"></i>`).join("")}</div>
+      <div class="small muted" style="margin-top:6px">Problems found by each check, oldest on the left (${P.trend.length} check${P.trend.length === 1 ? "" : "s"}).</div>` : `<div class="muted">No checks yet.</div>`;
+  const regimes = `<table><thead><tr><th>Rules from</th><th class="num">Rules</th><th class="num">Verified</th><th class="num">Open issues</th><th class="num">Designs affected</th></tr></thead><tbody>${
+    P.regimes.map(g => `<tr><td>${esc(plain(g.regime))}</td><td class="num">${g.rules}</td><td class="num ${g.verified < g.rules ? "c-warn" : ""}">${g.verified}</td>
+      <td class="num ${g.open_fail ? "c-fail" : "muted"}"><b>${g.open_fail}</b></td><td class="num">${g.designs_affected}</td></tr>`).join("")}</tbody></table>`;
+  const aiRows = ai.by_action.filter(a => a.count).map(a => `<div class="ship"><b style="font-weight:500">${esc(a.label)}</b><span>${a.count}</span></div>`).join("")
+    || `<div class="muted">The AI helpers have not been used yet.</div>`;
+  $("#main").innerHTML = `
+  <div class="hero" style="margin-bottom:2px">Good ${greeting()}, ${esc(cap(P.me.name))} 👋</div>
+  <div class="sub2">Compliance posture across every ship design checked in RuleTrace.</div>
+  <div class="kpis">
+    <div class="kpi"><b>${k.designs}</b><span>ship designs checked<br>${k.checks_run} check${k.checks_run === 1 ? "" : "s"} run</span></div>
+    <div class="kpi"><b class="c-fail">${k.major_open}</b><span>major issues open</span></div>
+    <div class="kpi"><b class="c-warn">${k.minor_open}</b><span>minor issues open</span></div>
+    <div class="kpi"><b class="c-unknown">${k.unknown_open}</b><span>checks that could not be decided</span></div>
+    <div class="kpi"><b class="c-pass">${pct(k.pass_rate)}</b><span>of decided checks pass</span></div>
+  </div>
+  <h2>Executive compliance intelligence</h2>
+  <div class="grid g4" style="margin-bottom:14px">
+    <div class="card" style="margin:0"><h2>Compliance posture</h2><div class="lvl ${esc(r.level)}">${esc(r.label)}</div><div class="small muted">${esc(r.reason)}</div>
+      <details class="small muted" style="margin-top:8px"><summary>How is this decided?</summary>${esc(r.rule)}</details></div>
+    <div class="card" style="margin:0"><h2>Rule pack</h2><div class="big">${rp.verified}<span class="muted" style="font-size:18px"> of ${rp.rules}</span></div>
+      <div class="small muted">rules verified against the official text${rp.unverified ? `<details style="margin-top:6px"><summary>${rp.unverified} not verified yet</summary>${rp.unverified_rules.map(u => `<div>${esc(u.id)}</div>`).join("")}</details>` : ""}</div></div>
+    <div class="card" style="margin:0"><h2>Check coverage</h2><div class="big">${pct(k.coverage)}</div><div class="small muted">of rule checks could be decided. The rest need a value the design does not give.</div></div>
+    <div class="card" style="margin:0"><h2>History integrity</h2><div class="big ${c.ok === false ? "c-fail" : "c-pass"}">${c.ok === false ? "BROKEN" : "INTACT"}</div>
+      <div class="small muted">${c.ok === false ? "The check history has been changed (record #" + esc(c.first_broken_seq) + ")." : "all " + esc(c.entries ?? 0) + " saved records are unchanged."}</div></div>
+  </div>
+  <div class="card"><h2>What needs your attention</h2>${sig}</div>
+  <div class="card"><h2>All designs checked</h2>${ships}</div>
+  <div class="grid g3" style="align-items:start">
+    <div class="card"><h2>Where to focus first</h2>${focus}</div>
+    <div class="card"><h2>Issues that recur across designs</h2>${rec}</div>
+    <div class="card"><h2>Trend</h2>${trend}</div>
+  </div>
+  <div class="grid g2" style="align-items:start">
+    <div class="card"><h2>Rule coverage by regulation</h2>${regimes}</div>
+    <div class="card"><h2>How AI was used</h2>${aiRows}
+      ${ai.explanations ? `<div class="small muted" style="margin-top:8px">${ai.explanations} explanation${ai.explanations === 1 ? "" : "s"} written, ${ai.explanations_fell_back} replaced by the rule's own text because they failed the checks.</div>` : ""}
+      <div class="small muted" style="margin-top:8px">${esc(ai.policy)}</div></div>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:14px"><button id="verify">Check the history is intact</button><button id="dl" class="primary">Download the compliance record</button></div>`;
+  $("#verify").onclick = async () => { try { const a = await api("/ruletrace/audit"); toast(a.chain.ok ? `Intact: all ${a.chain.entries} records unchanged` : `Changed at record #${a.chain.first_broken_seq}`, !a.chain.ok); } catch(e){ toast(e.message, true) } };
+  $("#dl").onclick = async () => { try {
+    const a = await api("/ruletrace/audit"), l = document.createElement("a");
+    l.href = URL.createObjectURL(new Blob([JSON.stringify(a, null, 2)], {type: "application/json"}));
+    l.download = `ruletrace-compliance-record-${new Date().toISOString().slice(0, 10)}.json`; l.click(); } catch(e){ toast(e.message, true) } };
 }
 // ---------------- executive view ----------------
 function money(n){ return new Intl.NumberFormat(undefined, {style:"currency", currency: V.currency || "EUR", maximumFractionDigits:0}).format(n); }

@@ -1,0 +1,12 @@
+# Who sees what in RuleTrace. Enforced by the API, not only hidden in the screen.
+# These roles replace the views of the same name in Vartija's config/access.yaml, so RuleTrace
+# has its own role map. Role names are lower-cased, and spaces become "_" (same as the login token).
+# A person with several roles gets the first matching view in this order: engineer, compliance, executive.
+views:
+  # Checks designs, uploads files, reads element-level findings, uses the AI helpers. Can change things.
+  engineer: [engineer, naval_architect, design_engineer, admin]
+  # Oversight, read-only: organisation-wide compliance posture, rule coverage, AI use and the audit record.
+  # Cannot upload or check designs, so the people who check and the people who oversee are different roles.
+  compliance: [ciso, compliance_lead, class_manager, grc_manager, auditor]
+  # Plain summary and money figures. No element-level findings, no audit record.
+  executive: [management, ceo, executive, board]
