@@ -158,6 +158,18 @@ from the ship's breadth), `actual_expr` (a value computed from the geometry), `f
 Applicability keys: `ship_types`, `passenger_ship`, `passengers_more_than`, `keel_laid_on_or_after`,
 `length_m_at_least`, `gross_tonnage_at_least`, `operating_areas_any`.
 
+## AI actions (local model, verified by the rule engine)
+
+**Fix suggestions** `POST /ruletrace/designs/{id}/fixes` (`ruletrace/llm_actions.py`)
+- What: for each failing finding (default 5), proposes a new value for the property the rule tests, e.g. stair `clear_width` 850 mm → 900 mm.
+- Guard: a proposal is applied to a copy of the design and re-checked; it is kept only if that finding passes **and nothing else newly fails**. Wrong element, wrong property or a value without a unit is rejected. A rule-based fallback (the required value itself) works with no model.
+- Limit: only single-property fixes. Checks computed from geometry (zone length, double-bottom height) or from several parts get no proposal. Nothing is written to the design until an engineer applies it.
+
+**Plain-language what-if** `POST /ruletrace/designs/{id}/whatif` with `{"text": "keel laid in 2027 and we also operate in the Baltic"}`
+- What: turns the question into ship-profile changes, re-checks, and returns what newly fails, newly passes and which rules switch on or off.
+- Guard: only the allowed profile fields; operating areas from the known list and named in the question; keel date ISO and its year in the question; numbers in range and present in the question. Anything unclear is refused with HTTP 422, never guessed.
+- Limit: changes the ship profile only, not the design itself. Measure both with `python scripts/evaluate_llm.py` (with Ollama running).
+
 ## Accuracy
 
 ```bash

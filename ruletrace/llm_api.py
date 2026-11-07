@@ -4,6 +4,8 @@
     POST /ruletrace/designs/{id}/explain       plain-language explanation of each failing finding
     POST /ruletrace/rules/draft                regulation text -> DRAFT rule YAML (never saved automatically)
     POST /ruletrace/ask                        grounded Q&A over the rule pack (+ a design's findings)
+    POST /ruletrace/designs/{id}/fixes         verified fix suggestions (llm_actions.py)
+    POST /ruletrace/designs/{id}/whatif        plain-language what-if -> validated overrides -> diff (llm_actions.py)
 
 The model never decides compliance; see llm_assist.py. Each use is written to the audit chain.
 """
@@ -108,6 +110,9 @@ def add_llm_routes(app, router, engineer, path_of) -> None:
         _audit(who, "rule.drafted", {"model": client.name, "text_sha256": out["text_sha256"], "regime": body.regime,
                                      "ref": body.ref, "drafts": len(out["drafts"]), "usable": len(ok_rules)})
         return out
+
+    from .llm_actions import add_action_routes  # verified fix suggestions and plain-language what-if
+    add_action_routes(app, router, engineer, path_of, lambda: get_client(), _audit)
 
     @router.post("/ask")
     def ask(body: AskIn, who: Principal = Depends(engineer)) -> dict:
