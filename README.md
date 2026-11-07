@@ -93,8 +93,13 @@ local Ollama model only; Groq and Gemini are off even if their keys are set (the
 shows *🔒 Confidential mode*). Retrieval, OCR, unit conversion and every PASS / FAIL always run locally. For
 confidential work keep **no Gemini key** in `.env`.
 
-Only for public documents and demos, cloud models can be allowed in `.env` (git-ignored):
-`COPILOT_CONFIDENTIAL=0`, `GROQ_API_KEY=...` (bot, free; then you can choose among three Groq models and see each
+**Switching it off (public documents only).** In the panel, *Turn off (public documents only)* asks the engineer to
+confirm that no Meyer data will be used and to give a reason; it then allows Groq (and Gemini, if a key is set) for
+60 minutes and switches back on by itself. Every switch is in the audit log. `COPILOT_CONFIDENTIAL_LOCK=1` locks it
+on for a Meyer installation.
+
+The cloud keys go in `.env` (git-ignored); `COPILOT_CONFIDENTIAL=0` starts with confidential mode off:
+`GROQ_API_KEY=...` (bot, free; then you can choose among three Groq models and see each
 one's measured accuracy), and optionally `GEMINI_API_KEY=...` (reads drawings and pictures only). The panel then
 shows *⚠ Cloud models allowed*. Free Gemini keys allow about 20 requests per model per day; the Copilot rotates over
 the free flash models (`rulemate/llm.py`, `GEMINI_FREE_MODELS`), and readings are cached per image under

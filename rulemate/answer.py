@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .config import CLAUSES_FILE, ROOT, CACHE_DIR
-from .guardrails import check_answer
+from .guardrails import CITATION_RE, check_answer, extract_numbers
 from .ingest.parsers import NOT_A_VALUE
 from .llm import LLMError, get_llm
 from .models import Clause
@@ -40,8 +40,10 @@ header line of the clause that supports it. Put the citation at the end of the s
 5. Do not guess. Never use words like "probably", "typically", "usually", "likely", "generally".
 6. State conditions and exceptions that the clauses give (for example "provided that ...").
 7. If a clause refers to another clause that is in the list (for example "calculated in accordance with 4.2"), also state what the referenced clause requires, and cite it.
-8. If the clauses do not answer the question, reply with exactly: NOT_FOUND
-9. Be concise: 1 to 5 sentences, or a short bullet list. No preamble, no closing remarks."""
+8. If clauses from different documents answer the question, give each document's requirement in its own sentence.
+9. Include every number that answers the question, with its unit, exactly as written.
+10. If the clauses do not answer the question, reply with exactly: NOT_FOUND
+11. Be concise: 1 to 6 sentences, or a short bullet list. No preamble, no closing remarks."""
 
 
 class Citation(BaseModel):
@@ -129,6 +131,55 @@ def build_messages(question: str, hits: list[Hit], confidence: str) -> list[dict
     )
     user = f"Rule clauses:\n\n{format_context(hits)}\n\nQuestion: {question}{caution}"
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
+
+
+_REQUIREMENT = re.compile(r"\b(shall|must|should|minimum|maximum|min\.|max\.|not less|not more|at least|"
+                          r"not exceed|no more|no less|required|permitted)\b", re.I)
+MAX_KEY_VALUES = 6
+
+
+def key_values(answer: str, cited: list[Clause], hits: list[Hit]) -> list[tuple[Clause, str]]:
+    """Requirement sentences (or table rows) with a value the answer leaves out, from the cited clauses and the
+    clauses they refer to. Quoted word for word, so a number can never go missing from a verified answer."""
+    have = {v for v, _ in extract_numbers(CITATION_RE.sub("", answer))}
+    ids = {c.clause_id for c in cited}
+    pool = list(cited)
+    for h in hits:  # clauses the cited ones refer to ("calculated in accordance with 4.2")
+        c = h.clause
+        if c.clause_id not in ids and (h.via in ids or any(c.clause_id in x.refs for x in cited)):
+            pool.append(c)
+            ids.add(c.clause_id)
+    out: list[tuple[Clause, str]] = []
+    for c in pool:
+        if c.kind == "heading":
+            continue
+        lines = c.text.splitlines()
+        if any(l.startswith("|") for l in lines):  # a table: its rows, header kept
+            rows = [l for l in lines if l.startswith("|") and not re.fullmatch(r"[|\s:-]+", l)]
+            missing = [r for r in rows[1:] if any(v not in have for v, _ in extract_numbers(r))]
+            if missing:
+                out.append((c, "\n".join(rows[:1] + missing[:8])))
+            continue
+        for sent in re.split(r"(?<=[.;])\s+(?=[A-Z(])", c.text):
+            vals = [v for v, u in extract_numbers(sent) if u]
+            if vals and any(v not in have for v in vals) and _REQUIREMENT.search(sent):
+                out.append((c, re.sub(r"\s+(?:Exceptions?:\s*)?\d{1,2}\.$", "", sent.strip())))  # "... stop. 2."
+                have.update(vals)
+            if len(out) >= MAX_KEY_VALUES:
+                return out
+    return out[:MAX_KEY_VALUES]
+
+
+def with_key_values(text: str, cited: list[Clause], hits: list[Hit]) -> tuple[str, list[str]]:
+    kv = key_values(text, cited, hits)
+    if not kv:
+        return text, []
+    quoted = []
+    for c, q in kv:
+        body = q if q.startswith("|") else f"> {q} {c.citation}"
+        quoted.append(f"{c.citation}\n{q}" if q.startswith("|") else body)
+    return (text + "\n\n**Also stated in the cited clauses** (quoted word for word, not generated):\n"
+            + "\n".join(quoted)), [c.uid for c, _ in kv]
 
 
 def is_not_found(text: str) -> bool:
@@ -231,7 +282,7 @@ def _index_digest() -> str:
 
 def _cache_key(question: str, model: str) -> str:
     q = re.sub(r"\s+", " ", question.strip().lower()).rstrip("?. ")
-    return hashlib.sha1(f"{q}|{model}|{_index_digest()}".encode()).hexdigest()
+    return hashlib.sha1(f"{q}|{model}|{_index_digest()}|kv1".encode()).hexdigest()  # kv1: quoted key values
 
 
 def _cache_load() -> dict:
@@ -310,11 +361,13 @@ def answer_question(
 
         check = check_answer(raw, retrieved)
         if check.ok:
+            text, extra_uids = with_key_values(check.text, check.cited, hits)
+            extra = [c for c in retrieved if c.uid in extra_uids and c not in check.cited]
             ans = Answer(
                 question=question,
                 status="verified",
-                text=check.text,
-                citations=_citations(check.cited),
+                text=text,
+                citations=_citations(list(check.cited) + extra),
                 sources=res.hits,
                 confidence=res.confidence,
                 top_score=res.top_score,

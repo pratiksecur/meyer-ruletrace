@@ -116,9 +116,26 @@ async function refresh() {
   const docs = status.documents.map(d => `${esc(d.doc)} (${d.clauses} clauses)`).join(" · ");
   $c("#cpState").innerHTML = `<b>Full texts:</b> ${docs}<br>Bot: ${esc(status.provider)} · Gemini (optional, drawings only): ${status.gemini ? "ready" : status.confidential ? "off" : "not set"}`;
   $c("#cpConf").innerHTML = status.confidential
-    ? `<b>🔒 Confidential mode</b>: nothing leaves this computer. Answers come from the local Ollama model; Groq and Gemini are off.`
-    : `<b>⚠ Cloud models allowed</b>: questions go to Groq${status.gemini ? ", drawings and pictures to Google Gemini" : ""}. Use only for public documents, never for Meyer designs.`;
+    ? `<b>🔒 Confidential mode</b>: nothing leaves this computer. Answers come from the local Ollama model; Groq and Gemini are off.
+       ${status.locked ? `<div class="small">Locked on for this installation.</div>` : `<button class="aib" id="cpConfOff">Turn off (public documents only)</button>
+       <div id="cpConfForm" hidden><label class="small"><input type="checkbox" id="cpConfPublic"> I will only use public documents
+         and questions here: no Meyer design, drawing or project data.</label>
+         <input id="cpConfReason" placeholder="Reason (e.g. demo with the public RCRV drawing)" style="width:100%;margin-top:4px">
+         <button class="aib" id="cpConfGo">Turn off for ${status.off_minutes} minutes</button>
+         <div class="small muted">Questions then go to Groq and drawings to Google Gemini (cloud). Recorded in the audit log.</div></div>`}`
+    : `<b>⚠ Confidential mode is OFF</b>${status.off_until ? ` until ${esc(status.off_until)} (by ${esc(status.off_by || "")})` : ""}:
+       questions go to Groq${status.gemini ? ", drawings and pictures to Google Gemini" : ""}. Public documents only, never Meyer designs.
+       <button class="aib" id="cpConfOn">Turn confidential mode back on</button>`;
   $c("#cpConf").className = status.confidential ? "conf on" : "conf off";
+  const sw = async body => { try { await call("/ruletrace/copilot/confidential", {method: "POST", body});
+      $c("#cpDocs").dataset.done = ""; refresh(); toast(body.on ? "Confidential mode is on" : "Confidential mode is off"); }
+    catch (e) { toast(e.message, true); } };
+  if ($c("#cpConfOff")) $c("#cpConfOff").onclick = () => { $c("#cpConfForm").hidden = false; $c("#cpConfOff").hidden = true; };
+  if ($c("#cpConfGo")) $c("#cpConfGo").onclick = () => {
+    if (!$c("#cpConfPublic").checked) return toast("Confirm that only public documents will be used", true);
+    if ($c("#cpConfReason").value.trim().length < 3) return toast("Give a reason", true);
+    sw({on: false, public_only: true, reason: $c("#cpConfReason").value.trim()}); };
+  if ($c("#cpConfOn")) $c("#cpConfOn").onclick = () => sw({on: true});
   $c("#cpGemOff").hidden = status.gemini; $c("#cpGemOff").textContent = status.gemini_off || "";
   $c("#cpRead").disabled = !status.gemini;
   if (!$c("#cpDocs").dataset.done) {

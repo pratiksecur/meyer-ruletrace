@@ -359,3 +359,31 @@ def test_confidential_mode_is_the_default_and_keeps_everything_local(indexed, mo
         "Door openings shall provide a clear width of 32 inches minimum [36CFR1191AppD § 404.2.3]."))
     a = indexed.post("/ruletrace/copilot/ask", headers=ENG, json={"question": "What clear width must an accessible door have?"})
     assert a.status_code == 200 and used == ["ollama"]
+
+
+def test_switch_confidential_mode_off_for_public_documents(indexed, monkeypatch):
+    import time
+
+    from ruletrace import copilot_api
+
+    monkeypatch.delenv("COPILOT_CONFIDENTIAL", raising=False)
+    url = "/ruletrace/copilot/confidential"
+    assert indexed.get("/ruletrace/copilot/status", headers=ENG).json()["confidential"]
+    # off only with the explicit confirmation and a reason
+    assert indexed.post(url, headers=ENG, json={"on": False}).status_code == 400
+    assert indexed.post(url, headers=ENG, json={"on": False, "public_only": True, "reason": ""}).status_code == 400
+    assert indexed.post(url, headers=CEO, json={"on": False, "public_only": True, "reason": "demo"}).status_code == 403
+    r = indexed.post(url, headers=ENG, json={"on": False, "public_only": True, "reason": "demo, public RCRV drawing"}).json()
+    assert r["confidential"] is False and r["off_until"] and r["off_by"] == "mikko"
+    assert copilot_api.provider() != "ollama"
+    # back on by hand ...
+    assert indexed.post(url, headers=ENG, json={"on": True}).json()["confidential"] is True
+    # ... or by itself when the time is up
+    indexed.post(url, headers=ENG, json={"on": False, "public_only": True, "reason": "demo"})
+    copilot_api._switch["off_until"] = time.time() - 1
+    assert copilot_api.confidential() is True
+    assert indexed.get("/audit/verify", headers=ENG).json()["ok"]
+    # an installation can lock it on
+    monkeypatch.setenv("COPILOT_CONFIDENTIAL_LOCK", "1")
+    assert indexed.post(url, headers=ENG, json={"on": False, "public_only": True, "reason": "demo"}).status_code == 403
+    assert indexed.get("/ruletrace/copilot/status", headers=ENG).json()["locked"] is True

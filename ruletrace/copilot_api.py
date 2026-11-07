@@ -81,6 +81,12 @@ class DesignIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class ConfidentialIn(BaseModel):
+    on: bool
+    public_only: bool = Field(default=False, description="confirms that only public documents will be used")
+    reason: str = Field(default="", max_length=300)
+
+
 class ReviewIn(BaseModel):
     kind: str = Field(pattern=r"^(verdict|reading|general_answer|limit)$")
     ref: str = Field(min_length=1, max_length=300, description="what was reviewed, e.g. item id and parameter")
@@ -101,11 +107,37 @@ def configure(upload_dir: Path) -> Path:
 BOT_PROVIDERS = "groq,ollama"
 
 
+OFF_MINUTES = 60  # confidential mode switched off in the panel comes back on by itself after this
+_switch: dict = {}  # runtime switch from the panel: {"off_until": epoch, "by": name, "reason": ...}
+
+
+def _env_confidential() -> bool:
+    return os.getenv("COPILOT_CONFIDENTIAL", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def confidential_locked() -> bool:
+    """COPILOT_CONFIDENTIAL_LOCK=1 (for Meyer installations): confidential mode cannot be switched off in the panel."""
+    return os.getenv("COPILOT_CONFIDENTIAL_LOCK", "0").strip() == "1"
+
+
 def confidential() -> bool:
     """Confidential mode (default ON, for Meyer designs): nothing leaves this computer. The bot uses only the local
-    Ollama model and Gemini is off, even if keys are set. COPILOT_CONFIDENTIAL=0 allows Groq and Gemini (public
-    documents, demos)."""
-    return os.getenv("COPILOT_CONFIDENTIAL", "1").strip().lower() not in ("0", "false", "no", "off")
+    Ollama model and Gemini is off, even if keys are set. An engineer can switch it off in the panel for public
+    documents (for OFF_MINUTES, recorded in the audit log), unless COPILOT_CONFIDENTIAL_LOCK=1.
+    COPILOT_CONFIDENTIAL=0 starts with it off."""
+    import time
+
+    if confidential_locked():
+        return True
+    until = _switch.get("off_until")
+    if until is not None:
+        if until > time.time():
+            return False
+        _switch.clear()  # the time is up: back to confidential
+        return True
+    if _switch.get("on"):
+        return True
+    return _env_confidential()
 
 
 def gemini_enabled() -> bool:
@@ -114,7 +146,7 @@ def gemini_enabled() -> bool:
 
 def gemini_off_reason() -> str:
     return ("Confidential mode: Gemini is off so drawings and pictures never leave this computer "
-            "(set COPILOT_CONFIDENTIAL=0 only for public documents)" if confidential()
+            "(switch it off in the panel only for public documents)" if confidential()
             else "set GEMINI_API_KEY in .env to read drawings and pictures (optional)")
 # models the user can choose in Ask (Groq free tier and the local Ollama model); never Gemini
 BOT_MODELS = [("groq", "openai/gpt-oss-120b"), ("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"),
@@ -285,7 +317,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         except HTTPException as e:
             return {"installed": False, "message": e.detail}
         out = {"installed": True, "index": _index_ready(), "provider": provider(),
-               "confidential": confidential(), "gemini": gemini_enabled(), "gemini_off": gemini_off_reason(),
+               **_mode(), "gemini": gemini_enabled(), "gemini_off": gemini_off_reason(),
                "gemini_role": "optional: reads drawings and pictures only",
                "models": bot_models(),
                "documents": []}
@@ -580,6 +612,36 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                             "hospital": any(r["confirmed"] and r["kind"] == "hospital" for r in rows)}}
 
     reviews_file = base / "reviews.jsonl"
+    _switch.clear()  # a (re)started server always starts from the configured mode
+
+    @router.post("/copilot/confidential")
+    def set_confidential(body: ConfidentialIn, who: Principal = Depends(engineer)) -> dict:
+        """Switch confidential mode. Off only with an explicit 'public documents only' confirmation and a reason;
+        it comes back on by itself after OFF_MINUTES. Every switch goes to the audit chain."""
+        import time
+
+        if body.on:
+            _switch.clear()
+            _switch["on"] = True
+        else:
+            if confidential_locked():
+                raise HTTPException(403, "Confidential mode is locked on for this installation (COPILOT_CONFIDENTIAL_LOCK=1)")
+            if not body.public_only or len(body.reason.strip()) < 3:
+                raise HTTPException(400, "To switch confidential mode off, confirm that only public documents will be "
+                                         "used and give a reason")
+            _switch.clear()
+            _switch.update(off_until=time.time() + OFF_MINUTES * 60, by=who.name, reason=body.reason.strip())
+        _audit(who, "copilot.confidential", {"on": confidential(), "reason": body.reason.strip(),
+                                             "minutes": None if body.on else OFF_MINUTES})
+        return _mode()
+
+    def _mode() -> dict:
+        import time
+
+        until = _switch.get("off_until")
+        return {"confidential": confidential(), "locked": confidential_locked(),
+                "off_until": time.strftime("%H:%M", time.localtime(until)) if until and not confidential() else None,
+                "off_by": _switch.get("by") if not confidential() else None, "off_minutes": OFF_MINUTES}
 
     @router.post("/copilot/review")
     def review(body: ReviewIn, who: Principal = Depends(engineer)) -> dict:
