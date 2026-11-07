@@ -42,8 +42,12 @@ header line of the clause that supports it. Put the citation at the end of the s
 7. If a clause refers to another clause that is in the list (for example "calculated in accordance with 4.2"), also state what the referenced clause requires, and cite it.
 8. If clauses from different documents answer the question, give each document's requirement in its own sentence.
 9. Include every number that answers the question, with its unit, exactly as written.
-10. If the clauses do not answer the question, reply with exactly: NOT_FOUND
-11. Be concise: 1 to 6 sentences, or a short bullet list. No preamble, no closing remarks."""
+10. A clause marked GUIDANCE is not mandatory: prefer a mandatory clause that answers the question, and if you use
+guidance, say that it is guidance ("should"). State who a clause applies to when its heading limits it (e.g. young
+seafarers, passenger ships).
+11. Never answer yes or no unless a cited clause states it; otherwise state what the clause requires.
+12. If the clauses do not answer the question, reply with exactly: NOT_FOUND
+13. Be concise: 1 to 6 sentences, or a short bullet list. No preamble, no closing remarks."""
 
 
 class Citation(BaseModel):
@@ -101,6 +105,8 @@ def format_context(hits: list[Hit]) -> str:
         human = readable_id(c)
         if human:
             meta.insert(0, f"= {human}")
+        if human.startswith("Guideline"):
+            meta.append("GUIDANCE (MLC Part B): not mandatory")
         blocks.append(f"{c.citation} {' | '.join(meta)}\n{expand_refs(c.text, visible)}")
     return "\n\n".join(blocks)
 

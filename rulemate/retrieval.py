@@ -62,10 +62,33 @@ def tokenize(text: str) -> list[str]:
     return out
 
 
-def clause_search_text(c: Clause) -> str:
-    """What gets indexed: breadcrumb + title + text, so 'stairway' in a heading helps its children."""
+_SUFFIXES = ("ings", "ing", "ers", "er", "est", "ed", "es", "e", "s")
+
+
+def stem(t: str) -> str:
+    """A small, consistent suffix stemmer for keyword search only ("steeper" ~ "steep", "seafarers" ~ "seafarer")."""
+    if len(t) <= 5 or not t.isalpha():
+        return t
+    for suf in _SUFFIXES:
+        if t.endswith(suf) and len(t) - len(suf) >= 4:
+            return t[: -len(suf)]
+    return t
+
+
+def search_tokens(text: str) -> list[str]:
+    return [stem(t) for t in tokenize(text)]
+
+
+def clause_search_text(c: Clause, parent: Clause | None = None) -> str:
+    """What gets indexed: breadcrumb + title + text, so 'stairway' in a heading helps its children. A lettered item
+    also carries the opening of its paragraph ("5. The limits on hours of work or rest shall be as follows:"),
+    which names what the item is about."""
     crumbs = " > ".join(p.split(" ", 1)[-1] for p in c.path)
-    return f"{crumbs}. {c.title}. {c.text}"
+    lead = ""
+    if parent is not None and parent.kind != "heading" and re.search(r"\([a-z]\)$", c.clause_id):
+        body = re.sub(r"^\s*\d{1,2}\.\s+", "", parent.text)  # "5. The limits ..." -> "The limits ..."
+        lead = re.split(r"(?<=[:.])\s", body, maxsplit=1)[0][:240] + " "
+    return f"{crumbs}. {c.title}. {lead}{c.text}"
 
 
 # --------------------------------------------------------------------- ID detection
@@ -153,13 +176,17 @@ class Retriever:
         for c in self.clauses:
             if c.parent_id:
                 self.children.setdefault(f"{c.doc}::{c.parent_id}", []).append(c)
-        self.bm25 = BM25Okapi([tokenize(clause_search_text(self.clauses[i])) for i in self.searchable])
+        self.texts = {i: clause_search_text(self.clauses[i], self.parent(self.clauses[i])) for i in self.searchable}
+        self.bm25 = BM25Okapi([search_tokens(self.texts[i]) for i in self.searchable])
         if self.use_dense:
             try:
                 self._load_dense()
                 self.mode = "hybrid"
             except Exception as e:  # offline, model missing, etc.
                 log.warning("Dense retrieval disabled (%s); using BM25 only.", e)
+
+    def parent(self, c: Clause) -> Clause | None:
+        return self.by_uid.get(f"{c.doc}::{c.parent_id}") if c.parent_id else None
 
     # -- embeddings ---------------------------------------------------------
     def _model_obj(self):
@@ -175,7 +202,7 @@ class Retriever:
         return self._model
 
     def _load_dense(self) -> None:
-        texts = [clause_search_text(self.clauses[i]) for i in self.searchable]
+        texts = [self.texts[i] for i in self.searchable]
         digest = hashlib.sha1(("\n".join(texts) + self.model_name).encode()).hexdigest()
         emb_file, meta_file = INDEX_DIR / "embeddings.npy", INDEX_DIR / "embeddings.json"
         if emb_file.exists() and meta_file.exists():
@@ -196,7 +223,7 @@ class Retriever:
         return np.asarray(self._model_obj().encode([prefix + q], normalize_embeddings=True)[0], dtype=np.float32)
 
     # -- search -------------------------------------------------------------
-    def search(self, query: str, k: int = 5, follow_refs: bool = True, pool: int = 30,
+    def search(self, query: str, k: int = 5, follow_refs: bool = True, pool: int = 100,
                docs: list[str] | None = None) -> RetrievalResult:
         """``docs``: only search these rule documents (the rule sets that apply to the vessel); None = all."""
         hits: list[Hit] = []
@@ -224,7 +251,7 @@ class Retriever:
                 self._follow_refs(hits, add)
             return RetrievalResult(query=query, hits=hits, found=bool(hits), confidence="high" if hits else "none",
                                    top_score=1.0 if hits else 0.0, mode=self.mode, id_queries=id_queries)
-        bm = self.bm25.get_scores(tokenize(query))
+        bm = self.bm25.get_scores(search_tokens(query))
         mask = None
         if allowed:
             mask = np.array([self.clauses[i].doc in allowed for i in self.searchable])
@@ -244,6 +271,10 @@ class Retriever:
             for j, r in ranks.items():
                 fused[j] = fused.get(j, 0.0) + 1.0 / (RRF_K + r + 1)
         ranked = sorted(fused, key=lambda j: -fused[j])
+        # the best two of each list always make the shortlist: a clause that is clearly first for the exact words
+        # ("14 hours in any 24-hour period") but short, and so far down by meaning, is not drowned by the fusion
+        sure = [j for j in bm_order[:2]] + [j for j in sorted(dense_rank, key=dense_rank.get)[:2]]
+        ranked = list(dict.fromkeys(sure + ranked))
         norm = 2.0 / (RRF_K + 1) if dense_rank else 1.0 / (RRF_K + 1)  # max possible fused score
 
         top_cos = float(cos.max()) if cos is not None else None
