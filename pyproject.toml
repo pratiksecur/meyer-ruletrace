@@ -27,4 +27,4 @@ copilot = ["pydantic>=2.7", "python-dotenv>=1.0", "numpy>=1.26", "pdfplumber>=0.
 include = ["ruletrace*", "rulemate*"]
 
 [tool.setuptools.package-data]
-ruletrace = ["static/*", "rules/*.yaml", "samples/*", "value.yaml", "copilot_rules/*.md"]
+ruletrace = ["static/*", "rules/*.yaml", "samples/*", "value.yaml", "copilot_rules/*.md", "copilot_rules/*.csv"]

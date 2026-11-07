@@ -28,7 +28,8 @@ document.body.insertAdjacentHTML("beforeend", `
 <aside class="cp" id="cp" aria-label="RuleMate Copilot">
   <div class="top"><div><b>RuleMate Copilot</b><div class="tagline">Gemini reads, code checks: every answer traceable to a clause</div></div>
     <span class="sp"></span><button id="cpClose" aria-label="Close">×</button></div>
-  <div class="tabs"><button data-tab="ask" class="on">Ask the regulations</button><button data-tab="read">Read with Gemini</button></div>
+  <div class="tabs"><button data-tab="ask" class="on">Ask</button><button data-tab="check">Check values</button>
+    <button data-tab="browse">Browse</button><button data-tab="read">Gemini</button></div>
   <div class="body">
     <div class="state" id="cpState">Checking the Copilot…</div>
     <section id="tab-ask">
@@ -37,6 +38,28 @@ document.body.insertAdjacentHTML("beforeend", `
       <div class="docs" id="cpDocs"></div>
       <button class="primary" id="cpAsk" style="width:100%">Ask</button>
       <div id="cpAns"></div>
+    </section>
+    <section id="tab-check" hidden>
+      <div class="small muted">Design values against limits taken from the full regulation texts. Units are converted
+        in code (mm, in, ft, 2'-6"); PASS / FAIL / NEEDS REVIEW is computed, never written by a model.</div>
+      <div class="docs" id="cpCheckDocs"></div>
+      <div class="row"><input type="file" id="cpCsv" accept=".csv" style="flex:1">
+        <button id="cpExample" title="Accessible stateroom, synthetic values with planted defects">Example</button></div>
+      <div class="small muted">CSV columns: item_id, space, parameter, value, unit, source</div>
+      <div class="ship" style="margin-top:10px"><input id="cpVSpace" placeholder="Space (e.g. Accessible cabin bathroom)">
+        <input id="cpVParam" placeholder="Parameter (e.g. door clear width)">
+        <input id="cpVValue" placeholder="Value (30, 2'-6&quot;, 1500)"><input id="cpVUnit" placeholder="Unit (in, mm)"></div>
+      <div class="row"><button id="cpVAdd" style="flex:1">Add value</button>
+        <button class="primary" id="cpRunCheck" style="flex:2">Run check</button></div>
+      <div id="cpVList" class="small"></div>
+      <div id="cpCheckOut"></div>
+    </section>
+    <section id="tab-browse" hidden>
+      <div class="row"><select id="cpBDoc" style="flex:1"></select></div>
+      <div class="row"><input id="cpBQ" placeholder="Search the full texts, or type a clause number" style="flex:1">
+        <button id="cpBGo">Search</button></div>
+      <div id="cpBClause"></div>
+      <div id="cpBList" class="small"></div>
     </section>
     <section id="tab-read" hidden>
       <div class="drop">Drop in a <b>picture</b> (screenshot from the design tool, sketch, photo with dimensions) or a
@@ -53,7 +76,8 @@ const openPanel = (tab) => { panel.classList.add("open"); if (tab) showTab(tab);
 $c("#cpClose").onclick = () => panel.classList.remove("open");
 function showTab(t) {
   document.querySelectorAll(".cp .tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
-  $c("#tab-ask").hidden = t !== "ask"; $c("#tab-read").hidden = t !== "read";
+  for (const k of ["ask", "check", "browse", "read"]) $c(`#tab-${k}`).hidden = t !== k;
+  if (t === "browse" && !$c("#cpBList").dataset.done) outline();
 }
 document.querySelectorAll(".cp .tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $c("#cpEx").innerHTML = EXAMPLES.map(q => `<button data-q="${esc(q)}">${esc(q)}</button>`).join("");
@@ -76,7 +100,10 @@ async function refresh() {
   const docs = status.documents.map(d => `${esc(d.doc)} (${d.clauses} clauses)`).join(" · ");
   $c("#cpState").innerHTML = `<b>Full texts:</b> ${docs}<br>Answers: ${esc(status.provider)} · Gemini ${status.gemini ? "ready" : "not set (GEMINI_API_KEY)"}`;
   if (!$c("#cpDocs").dataset.done) {
-    $c("#cpDocs").innerHTML = status.documents.map(d => `<label><input type="checkbox" value="${esc(d.doc)}" checked> ${esc(d.doc)}</label>`).join("");
+    const boxes = status.documents.map(d => `<label><input type="checkbox" value="${esc(d.doc)}" checked> ${esc(d.doc)}</label>`).join("");
+    $c("#cpDocs").innerHTML = boxes; $c("#cpCheckDocs").innerHTML = boxes;
+    $c("#cpBDoc").innerHTML = `<option value="">All documents</option>` + status.documents.map(d =>
+      `<option value="${esc(d.doc)}">${esc(d.doc)}: ${esc(d.title)}</option>`).join("");
     $c("#cpDocs").dataset.done = "1";
   }
 }
@@ -117,7 +144,7 @@ $c("#cpQ").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKe
 document.addEventListener("click", async e => {
   const c = e.target.closest?.(".cite"); if (!c) return;
   try { const k = await call(`/ruletrace/copilot/clause/${encodeURIComponent(c.dataset.uid)}`);
-    const box = c.closest(".ans")?.querySelector("#cpClause") || $c("#cpClause");
+    const box = c.closest(".item")?.querySelector(".cl") || c.closest(".ans")?.querySelector("#cpClause") || $c("#cpClause");
     box.innerHTML = `<div class="clause"><div class="h">${esc(k.doc)} § ${esc(k.clause_id)} ${esc(k.title || "")}</div>${esc(k.text)}</div>`;
   } catch (err) { toast(err.message, true); }
 });
@@ -187,3 +214,98 @@ function showDrawing(r) {
     } catch (e) { toast(e.message, true); }
   };
 }
+
+// ---------- check values ----------
+const vrows = [];
+function drawRows() {
+  $c("#cpVList").innerHTML = vrows.length ? `<table><tr><th>Space</th><th>Parameter</th><th>Value</th><th></th></tr>${vrows.map((r, i) =>
+    `<tr><td>${esc(r.space)}</td><td>${esc(r.parameter)}</td><td>${esc(r.value)} ${esc(r.unit)}</td>
+     <td><button data-del="${i}" style="padding:0 6px">×</button></td></tr>`).join("")}</table>` : "";
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { vrows.splice(+b.dataset.del, 1); drawRows(); });
+}
+$c("#cpVAdd").onclick = () => {
+  const r = {space: $c("#cpVSpace").value.trim(), parameter: $c("#cpVParam").value.trim(),
+             value: $c("#cpVValue").value.trim(), unit: $c("#cpVUnit").value.trim()};
+  if (!r.parameter || !r.value) return toast("Give at least a parameter and a value", true);
+  vrows.push(r); ["#cpVParam", "#cpVValue"].forEach(k => $c(k).value = ""); drawRows();
+};
+const checkDocs = () => [...document.querySelectorAll("#cpCheckDocs input:checked")].map(i => i.value);
+let lastCheck = null;
+async function runCheck(csvFile) {
+  $c("#cpRunCheck").disabled = true; $c("#cpCheckOut").innerHTML = `<div class="ans muted">Checking…</div>`;
+  try {
+    let r;
+    if (csvFile) { const fd = new FormData(); fd.append("file", csvFile); fd.append("docs", checkDocs().join(","));
+      r = await call("/ruletrace/copilot/check/csv", {method: "POST", body: fd}); }
+    else { if (!vrows.length) throw new Error("Add a value or choose a CSV first");
+      r = await call("/ruletrace/copilot/check", {method: "POST", body: {rows: vrows, docs: checkDocs()}}); }
+    lastCheck = r; showCheck(r);
+  } catch (e) { $c("#cpCheckOut").innerHTML = `<div class="ans" style="color:var(--fail)">${esc(e.message)}</div>`; }
+  finally { $c("#cpRunCheck").disabled = false; }
+}
+$c("#cpRunCheck").onclick = () => runCheck($c("#cpCsv").files[0]);
+$c("#cpExample").onclick = async () => {
+  const r = await fetch("/ruletrace/copilot/example.csv", {headers: RT().headers()});
+  if (!r.ok) return toast("Build the index first", true);
+  runCheck(new File([await r.text()], "accessible_stateroom_example.csv", {type: "text/csv"}));
+};
+function showCheck(r) {
+  $c("#cpCheckOut").innerHTML = `<div class="sum"><div><b style="color:var(--fail)">${r.counts.FAIL}</b>fail</div>
+      <div><b style="color:var(--warn)">${r.counts["NEEDS REVIEW"]}</b>needs review</div><div><b style="color:var(--pass)">${r.counts.PASS}</b>pass</div></div>
+    ${r.results.map((x, i) => `<div class="item" data-ci="${i}"><div class="h"><span class="t">${esc(x.parameter)}: ${esc(x.value)}</span>${pill(x.verdict)}</div>
+      <div class="small muted">${esc(x.item_id)} · ${esc(x.space)}${x.deciding ? ` · ${esc(x.deciding.limit)} <span class="cite" data-uid="${esc(x.deciding.uid)}">${esc(x.deciding.clause)}</span>` : " · no matching limit"}</div>
+      <div class="more" hidden><pre>${esc(x.reason)}</pre></div><div class="cl"></div></div>`).join("")}
+    <button class="aib" id="cpDl">Download results (CSV)</button>
+    <div class="how">Limits come from the clause text; values are converted with pint and compared in code. NEEDS REVIEW when a limit has a condition code cannot confirm.</div>`;
+  document.querySelectorAll("#cpCheckOut .item").forEach(el => el.onclick = e => {
+    if (e.target.closest(".cite")) return; const m = el.querySelector(".more"); m.hidden = !m.hidden; });
+  $c("#cpDl").onclick = () => {
+    const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = ["item_id,space,parameter,value,verdict,deciding_limit,clause", ...r.results.map(x =>
+      [x.item_id, x.space, x.parameter, x.value, x.verdict, x.deciding?.limit, x.deciding?.clause].map(q).join(","))].join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"}));
+    a.download = "copilot_check.csv"; a.click();
+  };
+}
+
+// ---------- browse ----------
+async function outline() {
+  const doc = $c("#cpBDoc").value;
+  try { const r = await call(`/ruletrace/copilot/browse?doc=${encodeURIComponent(doc)}`);
+    $c("#cpBList").dataset.done = "1";
+    $c("#cpBList").innerHTML = `<div class="muted" style="margin:8px 0">${r.items.length} clauses${doc ? "" : " in all documents"}. Click one to read it.</div>` +
+      r.items.map(x => `<div class="bl" data-uid="${esc(x.uid)}" style="padding:3px 0 3px ${Math.min(x.depth, 5) * 12}px;cursor:pointer;${x.kind === "heading" ? "font-weight:600" : ""}">
+        <span class="muted">${doc ? "" : esc(x.doc) + " "}</span>${esc(x.clause_id)} ${esc(x.title || x.snippet)}</div>`).join("");
+  } catch (e) { $c("#cpBList").innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+}
+async function search() {
+  const q = $c("#cpBQ").value.trim(); if (!q) return outline();
+  const doc = $c("#cpBDoc").value;
+  try { const r = await call(`/ruletrace/copilot/browse?doc=${encodeURIComponent(doc)}&q=${encodeURIComponent(q)}`);
+    $c("#cpBList").innerHTML = `<div class="muted" style="margin:8px 0">${r.items.length} matches (retrieval confidence: ${esc(r.confidence)})</div>` +
+      r.items.map(x => `<div class="item bl" data-uid="${esc(x.uid)}"><div class="h"><span class="t">${esc(x.doc)} § ${esc(x.clause_id)} ${esc(x.title)}</span>
+        <span class="small muted">${esc(x.how)} ${x.score}</span></div><div class="small muted">${esc(x.snippet)}</div></div>`).join("");
+  } catch (e) { toast(e.message, true); }
+}
+async function showClause(uid) {
+  try { const k = await call(`/ruletrace/copilot/clause/${encodeURIComponent(uid)}`);
+    const link = x => `<span class="cite bln" data-uid="${esc(x.uid)}">${esc(x.clause_id)}</span>`;
+    $c("#cpBClause").innerHTML = `<div class="clause"><div class="small muted">${esc(k.path.join(" › "))}</div>
+      <div class="h">${esc(k.doc)} § ${esc(k.clause_id)} ${esc(k.title || "")}${k.page ? ` <span class="muted">p.${k.page}</span>` : ""}</div>
+      <div style="white-space:pre-wrap">${esc(k.text)}</div>
+      ${k.parent ? `<div class="small" style="margin-top:6px">Part of: ${link(k.parent)}</div>` : ""}
+      ${k.children.length ? `<div class="small">Sub-clauses: ${k.children.map(link).join(" ")}</div>` : ""}
+      ${k.refs.length ? `<div class="small">Refers to: ${k.refs.map(link).join(" ")}</div>` : ""}
+      ${k.referenced_by.length ? `<div class="small">Referred to by: ${k.referenced_by.map(link).join(" ")}</div>` : ""}
+      <button class="aib" id="cpAskThis">Ask about this clause</button></div>`;
+    $c("#cpAskThis").onclick = () => { $c("#cpQ").value = `What does ${k.doc} ${k.clause_id} require?`; showTab("ask"); ask(); };
+    $c("#cpBClause").scrollIntoView({block: "nearest"});
+  } catch (e) { toast(e.message, true); }
+}
+$c("#cpBGo").onclick = search;
+$c("#cpBQ").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+$c("#cpBDoc").onchange = () => ($c("#cpBQ").value.trim() ? search() : outline());
+document.addEventListener("click", e => {
+  const b = e.target.closest?.("#tab-browse .bl, #tab-browse .bln"); if (!b) return;
+  e.stopPropagation(); showClause(b.dataset.uid);
+}, true);
