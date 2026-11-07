@@ -82,8 +82,28 @@ _ID_PATTERNS = [
 _ID_RE = re.compile("|".join(f"(?:{p})" for p in _ID_PATTERNS), re.I)
 
 
+# MLC 2006: "Standard A3.1, paragraph 6(a)", "A3.1/6(a)", "Guideline B3.1.5", "Regulation 3.1", "Article V"
+_MLC_ID = re.compile(
+    r"\b(?:(?:Standard|Guideline)\s+)?(?P<code>[AB]\d{1,2}(?:\.\d{1,2}){1,3})(?:\s*(?:,\s*)?(?:/|\bpara(?:graph)?\.?\s*)"
+    r"(?P<p>\d{1,2})(?:\s*\((?P<l>[a-z])\))?)?(?![\w.])"
+    r"|\bRegulation\s+(?P<reg>\d(?:\.\d{1,2}){1,2})(?:,?\s*para(?:graph)?\.?\s*(?P<rp>\d{1,2}))?(?![\w.])"
+    r"|\bArticle\s+(?P<art>[IVX]{1,5})\b(?:,?\s*para(?:graph)?\.?\s*(?P<ap>\d{1,2}))?", re.I)
+
+
 def extract_clause_ids(query: str) -> list[str]:
-    return [m.group(0).strip() for m in _ID_RE.finditer(query)]
+    out = []
+    for m in _MLC_ID.finditer(query):
+        if m.group("code"):
+            cid = m.group("code").upper() + (f"/{m.group('p')}" if m.group("p") else "") + (
+                f"({m.group('l').lower()})" if m.group("l") else "")
+        elif m.group("reg"):
+            cid = f"R{m.group('reg')}" + (f"/{m.group('rp')}" if m.group("rp") else "")
+        else:
+            cid = f"Art.{m.group('art').upper()}" + (f"/{m.group('ap')}" if m.group("ap") else "")
+        out.append(cid)
+    # the words of an MLC reference are used up: "Standard A3.1 paragraph 12" must not also look up "paragraph 12"
+    rest = _MLC_ID.sub(" ", query) if out else query
+    return out + [m.group(0).strip() for m in _ID_RE.finditer(rest)]
 
 
 # --------------------------------------------------------------------- results

@@ -22,7 +22,7 @@ class FakeLLM:
 def indexed(client):
     r = client.post("/ruletrace/copilot/index", headers=ENG)
     assert r.status_code == 200, r.text
-    assert set(r.json()["documents"]) == {"36CFR1191AppD", "46CFR190"}
+    assert {"36CFR1191AppD", "46CFR190"} <= set(r.json()["documents"])  # + MLC2006 where downloaded
     return client
 
 
@@ -75,7 +75,8 @@ def test_read_picture_checks_only_confirmed_values(indexed, monkeypatch):
     Image.new("RGB", (1000, 500), "white").save(buf, format="PNG")
     r = indexed.post("/ruletrace/copilot/read", headers=ENG,
                      files={"file": ("cabin.png", buf.getvalue(), "image/png")}).json()
-    assert r["kind"] == "picture" and r["n_confirmed"] == 1
+    assert r["kind"] == "picture", r.get("in_short")
+    assert r["n_confirmed"] == 1
     door, turn = r["items"]
     assert door["verdict"] == "FAIL" and any("404.2.3" in c for c in door["clauses"])
     assert turn["confirmed"] is False and turn["verdict"] is None
@@ -225,12 +226,45 @@ def test_question_outside_the_rules_gets_a_labelled_general_answer(indexed, monk
 
     real = rulemate.general.general_answer
     monkeypatch.setattr(rulemate.general, "general_answer",
-                        lambda q, llm=None: real(q, FakeLLM("SOLAS covers safety; MLC covers crew.")))
+                        lambda q, llm=None, retriever=None: real(q, FakeLLM(GENERAL), retriever))
     a = indexed.post("/ruletrace/copilot/ask", headers=ENG,
                      json={"question": "What is the difference between SOLAS and MLC for a cruise ship?"}).json()
     assert a["status"] == "not_found" and a["general"]["ok"]
     assert "not from the loaded rules" in a["general"]["label"] and "SOLAS" in a["general"]["text"]
     assert not a["citations"]  # a general answer never cites a clause
+    refs = {r["source"]: r for r in a["general"]["references"]}
+    assert refs["SOLAS Chapter II-2"]["status"] == "named source, not loaded"
+    assert refs["ADA 404.2.3"]["status"] == "number NOT in this clause"  # 30 inches is not in 404.2.3
+    assert refs["Ship Interiors Blog"]["status"] == "not identified" and not refs["Ship Interiors Blog"]["url"]
+    assert any("NOT in" in w or "not attributed" in w or "does not contain" in w for w in a["general"]["warnings"])
+
+
+GENERAL = """{"answer": "SOLAS covers safety; MLC covers crew. An accessible door needs 30 inches.",
+ "references": [{"source": "SOLAS Chapter II-2", "supports": "fire safety", "url": "https://www.imo.org/en/About/Conventions"},
+                {"source": "ADA 404.2.3", "supports": "door clear width 30 inches"},
+                {"source": "Ship Interiors Blog", "supports": "MLC covers crew", "url": "https://example.com/blog"}],
+ "certainty": "medium"}"""
+
+
+def test_choose_the_bot_model(indexed, monkeypatch):
+    s = indexed.get("/ruletrace/copilot/status", headers=ENG).json()
+    ids = [m["id"] for m in s["models"]]
+    assert ids[0] == "auto" and "groq:openai/gpt-oss-120b" in ids and not any("gemini" in i for i in ids)
+    bad = indexed.post("/ruletrace/copilot/ask", headers=ENG, json={"question": "door width?", "model": "gemini:x"})
+    assert bad.status_code == 400
+    import rulemate.llm
+
+    seen = []
+
+    class P(FakeLLM):
+        def complete(self, messages, **kw):
+            seen.append(self.model)
+            return "Door openings shall provide a clear width of 32 inches minimum [36CFR1191AppD § 404.2.3]."
+
+    monkeypatch.setattr(rulemate.llm, "make_provider", lambda name: P(""))
+    a = indexed.post("/ruletrace/copilot/ask", headers=ENG, json={
+        "question": "What clear width must an accessible door have?", "model": "groq:openai/gpt-oss-20b"}).json()
+    assert seen and seen[0] == "openai/gpt-oss-20b" and a["status"] == "verified"
 
 
 def test_review_is_recorded_and_listed(indexed):
@@ -254,3 +288,39 @@ def test_accuracy_and_chart_numbers(indexed):
                        files={"file": ("ex.csv", r.encode(), "text/csv")}).json()
     d = next(x["deciding"] for x in out["results"] if x["deciding"])
     assert {"limit_value", "value_in_limit_unit", "unit", "comparator"} <= set(d)
+
+
+def test_mlc_clause_references():
+    from rulemate.retrieval import extract_clause_ids
+
+    assert extract_clause_ids("What does Standard A3.1, paragraph 6(a) require?") == ["A3.1/6(a)"]
+    assert extract_clause_ids("What does Standard A3.1 paragraph 12 require?") == ["A3.1/12"]  # not "paragraph 12"
+    assert extract_clause_ids("Explain regulation II-2/14.2.2") == ["II-2/14.2.2"]
+
+
+def test_mlc_parser_and_limits():
+    from rulemate.compliance.limits import extract_regex, validate
+    from rulemate.ingest.loaders import Block
+    from rulemate.ingest.parsers import MlcParser, detect_style
+    from rulemate.ingest.pipeline import build_clauses
+
+    lines = [("Regulation 3.1 – Accommodation and recreational facilities", 2),
+             ("Standard A3.1 – Accommodation and recreational facilities", 3), ("9. With respect to requirements for sleeping rooms:", None),
+             ("(e) the minimum inside dimensions of a berth shall be at least 198 centimetres by 80 centimetres;", None),
+             ("(f) in single berth seafarers’ sleeping rooms the floor area shall not be less than:", None),
+             ("(i) 4.5 square metres in ships of less than 3,000 gross tonnage;", None),
+             ("(ii) 5.5 square metres in ships of 3,000 gross tonnage or over but less than 10,000 gross tonnage;", None),
+             ("(g) more text", None), ("(h) more", None), ("(i) on passenger ships the floor area shall be large;", None),
+             ("Standard A3.2 – Food", 3), ("Standard A3.3 – X", 3)]
+    blocks = [Block(t, 45, "text", lvl) for t, lvl in lines]
+    assert detect_style(blocks) == "mlc"
+    p = MlcParser()
+    cl = {c.clause_id: c for c in build_clauses("MLC2006", p.parse(blocks), p, False)}
+    assert {"R3.1", "A3.1", "A3.1/9", "A3.1/9(e)", "A3.1/9(f)", "A3.1/9(i)"} <= set(cl)
+    assert cl["A3.1/9(e)"].parent_id == "A3.1/9" and cl["A3.1"].parent_id == "R3.1"
+    assert "(ii) 5.5 square metres" in cl["A3.1/9(f)"].text  # roman items stay inside the lettered item
+    berth = [validate(r, cl["A3.1/9(e)"], i, "regex")[0] for i, r in enumerate(extract_regex(cl["A3.1/9(e)"]))]
+    assert [(x.value, x.unit) for x in berth] == [(198, "centimetres"), (80, "centimetres")]
+    area = [validate(r, cl["A3.1/9(f)"], i, "regex")[0] for i, r in enumerate(extract_regex(cl["A3.1/9(f)"]))]
+    assert [(x.value, x.condition) for x in area] == [(4.5, "in ships of less than 3,000 gross tonnage"),
+        (5.5, "in ships of 3,000 gross tonnage or over but less than 10,000 gross tonnage")]

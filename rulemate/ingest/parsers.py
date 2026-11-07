@@ -6,6 +6,7 @@ Each numbering style gets a small parser:
 * ``ClassParser``   - "Pt.3 Ch.2" / "Section 4" / "[2.1.3] ..."      -> "Pt.3 Ch.2 Sec.4 [2.1.3]"
 * ``CfrParser``     - US CFR "Subpart 190.10" / "§ 190.10-25" / "(b)" -> "190.10-25(b)"
 * ``AdaParser``     - ADA / ABA standards "403 Walking Surfaces" / "403.5.1 Clear Width. ..." -> "403.5.1"
+* ``MlcParser``     - ILO MLC 2006 "Standard A3.1" / "6." / "(a)"                    -> "A3.1/6(a)"
 * ``DecimalParser`` - plain "4.2.1 ..." numbering                     -> "4.2.1"
 * ``FallbackParser``- headings only (or nothing): sections "S1", "S2", ...
 
@@ -567,13 +568,120 @@ class AdaParser:
             f"Table {m.group(1)}" for m in re.finditer(r"\bTable\s+(\d{3}(?:\.\d+)*)", text)]
 
 
+class MlcParser:
+    """Maritime Labour Convention, 2006 (as written by scripts/fetch_mlc.py).
+
+    "Article V"                         -> Art.V,   paragraphs Art.V/1
+    "Regulation 3.1 – Accommodation..." -> R3.1,    paragraphs R3.1/1
+    "Standard A3.1 – ..."               -> A3.1,    paragraphs A3.1/6, lettered items A3.1/6(a)
+    "Guideline B3.1.1 – ..."            -> B3.1.1,  paragraphs B3.1.1/1, B3.1.1/1(a)
+    Standards hang under their Regulation, Guidelines under the Standard of the same number, so a cited
+    paragraph shows its whole context. Roman sub-items (i), (ii) stay inside the lettered item.
+    "Title 5. ..." -> Title 5 (with its introduction, paragraphs Title 5/1); Appendices -> App.A5-I.
+    """
+
+    name = "mlc"
+    HEAD = re.compile(r"^(?:(?P<art>Article)\s+(?P<an>[IVX]+)|(?P<kind>Regulation|Standard|Guideline)\s+"
+                      r"(?P<n>[AB]?\d+(?:\.\d+){1,3})\s*[–—-]\s*(?P<t>.+)|(?P<app>Appendix)\s+(?P<pn>[AB]\d-[IVX]+)\s*(?P<pt>.*)"
+                      r"|(?P<pre>Preamble)|(?P<note>Explanatory note to the Regulations and Code))$")
+    PARA = re.compile(r"^(?P<n>\d{1,2})\.\s+(?P<rest>.*)$")
+    ITEM = re.compile(r"^\((?P<l>[a-z])\)\s+(?P<rest>.*)$")
+    REF = re.compile(r"\b(?:(Regulation)\s+(\d+(?:\.\d+){1,2})|(Standard)\s+(A\d+(?:\.\d+){1,2})|(Guideline)\s+(B\d+(?:\.\d+){1,3})"
+                     r"|(Article)\s+([IVX]+)\b)(?:,?\s+paragraphs?\s+(\d{1,2})(?:\s*\(([a-z])\))?)?")
+    LOCAL = re.compile(r"\bparagraphs?\s+(\d{1,2})(?:\s*\(([a-z])\))?\s+of\s+this\s+(Standard|Guideline|Article|Regulation)")
+
+    def parse(self, blocks: list[Block]) -> list[Draft]:
+        drafts: list[Draft] = []
+        unit: Draft | None = None   # current Article / Regulation / Standard / Guideline / Appendix
+        last_letter = ""
+        para: Draft | None = None
+        cur: Draft | None = None
+        for b in blocks:
+            line = b.text.strip()
+            if b.heading_level == 1:  # document title, or "Title 5. ...": its own short introduction, if any
+                if t := re.match(r"^Title\s+(\d)\b\.?\s*(.*)$", line):
+                    unit = Draft(f"Title {t.group(1)}", t.group(2).strip(), b.page, "heading", None, {"unit": f"Title {t.group(1)}"})
+                    drafts.append(unit)
+                    para = cur = None
+                    last_letter = ""
+                continue
+            if m := self.HEAD.match(line):
+                if m.group("art"):
+                    cid, title, parent = f"Art.{m.group('an')}", "", None
+                elif m.group("kind"):
+                    n = m.group("n")
+                    cid = ("R" + n) if m.group("kind") == "Regulation" else n
+                    parent = None if m.group("kind") == "Regulation" else (
+                        "R" + n[1:] if m.group("kind") == "Standard" else "A" + ".".join(n[1:].split(".")[:2]))
+                    last_letter = ""
+                    title = m.group("t").strip()
+                elif m.group("app"):
+                    cid, title, parent = f"App.{m.group('pn')}", m.group("pt").strip(" –-"), None
+                elif m.group("pre"):
+                    cid, title, parent = "preamble", "Preamble", None
+                else:
+                    cid, title, parent = "Note", "Explanatory note to the Regulations and Code", None
+                unit = Draft(cid, title, b.page, "heading", parent, {"unit": cid})
+                last_letter = ""
+                drafts.append(unit)
+                para = cur = None
+                continue
+            if unit is None:
+                continue
+            if (m := self.PARA.match(line)) and not unit.clause_id.startswith("App."):
+                last_letter = ""
+                para = cur = Draft(f"{unit.clause_id}/{m.group('n')}", unit.title, b.page, "clause", unit.clause_id,
+                                   {"unit": unit.clause_id})
+                cur.add(line)
+                drafts.append(cur)
+                continue
+            m = self.ITEM.match(line)
+            if m and m.group("l") in "ivx" and chr(ord(m.group("l")) - 1) != last_letter:
+                m = None  # roman numeral (i), (v), (x) of a sub-list, not the next letter: stays in the item
+            if para is not None and m:
+                last_letter = m.group("l")
+                cur = Draft(f"{para.clause_id}({m.group('l')})", unit.title, b.page, "clause", para.clause_id,
+                            {"unit": unit.clause_id})
+                cur.add(line)
+                drafts.append(cur)
+                continue
+            if cur is None:  # text right under a heading ("Purpose: ...", an unnumbered Article, an Appendix)
+                cur = unit
+                unit.kind = "section" if unit.clause_id.startswith(("App.", "R", "preamble", "Note")) else "clause"
+            elif cur is not para and para is not None and re.match(r"^\(?[ivx]+\)", line) is None and \
+                    cur.clause_id.endswith(")") and not line[:1].islower():
+                cur = para  # text after the lettered list belongs to the paragraph again
+            cur.add(line)
+        return drafts
+
+    def find_refs(self, text: str, ctx: dict) -> list[str]:
+        refs = []
+        for m in self.REF.finditer(text):
+            if m.group(1):
+                base = "R" + m.group(2)
+            elif m.group(3):
+                base = m.group(4)
+            elif m.group(5):
+                base = m.group(6)
+            else:
+                base = "Art." + m.group(8)
+            refs.append(base + (f"/{m.group(9)}" if m.group(9) else "") + (f"({m.group(10)})" if m.group(10) else ""))
+        unit = ctx.get("unit", "")
+        for m in self.LOCAL.finditer(text):
+            if unit:
+                refs.append(f"{unit}/{m.group(1)}" + (f"({m.group(2)})" if m.group(2) else ""))
+        return refs
+
+
 # ---------------------------------------------------------------- style detection
 
-PARSERS = {p.name: p for p in (SolasParser, ClassParser, NumberedParser, CfrParser, AdaParser, FallbackParser)}
+PARSERS = {p.name: p for p in (SolasParser, ClassParser, NumberedParser, CfrParser, AdaParser, MlcParser, FallbackParser)}
 
 
 def detect_style(blocks: list[Block]) -> str:
     lines = [b.text.strip() for b in blocks if b.kind == "text"]
+    if sum(1 for l in lines if re.match(r"^Standard\s+A\d\.\d\s*[–—-]", l)) >= 3:
+        return "mlc"
     if sum(1 for l in lines if CfrParser.SECTION.match(l)) >= 3:
         return "cfr"
     if sum(1 for l in lines if re.match(r"^[1-9]\d{2}\.\d+(?:\.\d+)*\s+[A-Z][^.]{2,60}\.", l)) >= 20:

@@ -1,4 +1,8 @@
+import os
+
 import pytest
+
+os.environ.setdefault("COPILOT_FETCH_MLC", "0")  # tests never download the ILO text
 from fastapi.testclient import TestClient
 from vartija_core.settings import Settings
 

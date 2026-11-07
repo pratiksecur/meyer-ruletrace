@@ -149,6 +149,37 @@ def _citations(clauses: list[Clause]) -> list[Citation]:
     ]
 
 
+_STOP = set("""about above after again against also among another anything around because before being below
+between board cabin cabins could design designs does doing during each either every from have having into least
+maximum minimum more most much must need needed needs other over required requirement requirements rule rules
+shall should ship ships since some such than that their them then there these they this those through under until
+upon what when where which while with within without would your vessel vessels people person persons large
+larger small smaller clause clauses explain allowed number amount total kind kinds type types thing things""".split())
+_VOCAB: dict[int, set[str]] = {}
+
+
+def unknown_terms(question: str, retriever) -> list[str]:
+    """Specific words of the question that occur in no loaded clause at all (e.g. "helicopter"): the rules
+    cannot cover a subject they never mention, however well other words match."""
+    clauses = getattr(retriever, "clauses", None)
+    if not clauses:
+        return []
+    key = id(clauses)
+    if key not in _VOCAB:
+        _VOCAB.clear()
+        words = {w for c in clauses for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}
+        _VOCAB[key] = words | {w[:6] for w in words}
+    stems = _VOCAB[key]
+    words = [w for w in re.findall(r"[a-z]{5,}", question.lower()) if w not in _STOP]
+    # same first six letters = same word family (narrower ~ narrow, permissible ~ permitted is NOT matched, so
+    # only words with no relative at all in the rules count)
+    def known(w: str) -> bool:
+        roots = [w, w[:6]] + [w[: -len(e)] for e in ("er", "r", "est", "st", "ly", "s", "es") if w.endswith(e)]
+        return any(r in stems for r in roots)
+
+    return [w for w in words if not known(w)]
+
+
 def not_found_answer(question: str, res: RetrievalResult, note: str = "") -> Answer:
     closest = [h for h in res.hits if h.source == "search"][:3]
     lines = [NOT_FOUND_TEXT]
@@ -262,7 +293,8 @@ def answer_question(
                                         attempts=attempt - 1, rejected_attempts=rejected,
                                         violations=last_violations))
         model = llm.label
-        if is_not_found(raw) and (res.confidence == "high" or any(h.source == "id" for h in res.hits)):
+        if is_not_found(raw) and (any(h.source == "id" for h in res.hits)
+                                  or (res.confidence == "high" and not unknown_terms(question, retriever))):
             # retrieval is confident (or the question names an existing clause): a refusal from the model is not
             # enough to tell the user "not found in the rules"; show the relevant clauses instead
             note = ("the model gave no answer; showing the requested clause" if any(h.source == "id" for h in res.hits)

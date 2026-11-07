@@ -30,8 +30,9 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
 Gemini is optional and kept apart: it only reads drawings and pictures (GEMINI_API_KEY). Without it, everything
 else works.
 
-The regulation texts (public domain) are in ruletrace/copilot_rules/: 46 CFR Part 190 and the ADA/ABA technical
-requirements (36 CFR 1191 App. D). The index and caches live under VARTIJA_UPLOAD_DIR/copilot (git-ignored).
+The regulation texts are in ruletrace/copilot_rules/: 46 CFR Part 190 and the ADA/ABA technical requirements
+(36 CFR 1191 App. D), public domain and in git; the Maritime Labour Convention 2006 (ILO) is downloaded from the
+ILO when the index is built (scripts/fetch_mlc.py) and not committed. The index and caches live under VARTIJA_UPLOAD_DIR/copilot (git-ignored).
 Needs the optional dependencies: pip install -e ".[copilot]".
 """
 
@@ -51,7 +52,7 @@ from vartija_core import audit
 from vartija_core.api import Principal
 
 RULES = Path(__file__).parent / "copilot_rules"
-DEFAULT_DOCS = ["36CFR1191AppD", "46CFR190"]
+DEFAULT_DOCS = ["36CFR1191AppD", "46CFR190", "MLC2006"]  # those of them that are loaded
 MAX_PDF_PAGES = 400
 MIN_ROOMS = 3  # fewer confirmed rooms than this make no meaningful RuleTrace design
 
@@ -59,6 +60,7 @@ MIN_ROOMS = 3  # fewer confirmed rooms than this make no meaningful RuleTrace de
 class AskIn(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
     docs: list[str] | None = Field(default=None, description="Rule documents to search; default all")
+    model: str | None = Field(default=None, description="one of /copilot/status models[].id; default: Groq, then Ollama")
 
 
 class CheckIn(BaseModel):
@@ -93,6 +95,43 @@ def configure(upload_dir: Path) -> Path:
 
 
 BOT_PROVIDERS = "groq,ollama"
+# models the user can choose in Ask (Groq free tier and the local Ollama model); never Gemini
+BOT_MODELS = [("groq", "openai/gpt-oss-120b"), ("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"),
+              ("ollama", os.getenv("OLLAMA_MODEL", "llama3.2:3b"))]
+
+
+def bot_models() -> list[dict]:
+    import json
+
+    measured = {}
+    try:
+        measured = {m["id"]: m for m in json.loads((RULES / "accuracy.json").read_text(encoding="utf-8")).get("models", [])}
+    except (OSError, ValueError):
+        pass
+    out = [{"id": "auto", "name": "Automatic (Groq, then local Ollama)", "ready": True}]
+    for prov, model in BOT_MODELS:
+        mid = f"{prov}:{model}"
+        ready = bool(os.getenv("GROQ_API_KEY")) if prov == "groq" else True
+        out.append({"id": mid, "name": f"{model} ({'Groq, cloud' if prov == 'groq' else 'Ollama, on this computer'})",
+                    "ready": ready, "accuracy": measured.get(mid)})
+    return out
+
+
+def bot_llm(choice: str | None):
+    """The chosen bot model, or the Groq -> Ollama chain. Only the listed models can be chosen."""
+    from rulemate.llm import ChainLLM, get_llm, make_provider
+
+    if not choice or choice == "auto":
+        return get_llm(provider())
+    allowed = {f"{p}:{m}": (p, m) for p, m in BOT_MODELS}
+    if choice not in allowed:
+        raise HTTPException(400, f"unknown model {choice!r}; choose one of: auto, {', '.join(allowed)}")
+    prov, model = allowed[choice]
+    llm = make_provider(prov)
+    llm.model = model
+    if prov == "ollama":
+        llm.timeout = max(getattr(llm, "timeout", 30), 120)  # a small local model is slower
+    return ChainLLM([llm])
 
 
 def provider() -> str:
@@ -196,6 +235,12 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         except ImportError as exc:
             raise HTTPException(501, f'Copilot not installed ({exc.name}): pip install -e ".[copilot]"') from exc
 
+    def _loaded(docs: list[str]) -> list[str]:
+        from rulemate.ingest import load_index
+
+        have = {d.doc for d in load_index().documents} if _index_ready() else set()
+        return [d for d in docs if d in have] or docs[:2]
+
     def _index_ready() -> bool:
         from rulemate.config import CLAUSES_FILE
 
@@ -209,6 +254,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             return {"installed": False, "message": e.detail}
         out = {"installed": True, "index": _index_ready(), "provider": provider(),
                "gemini": bool(os.getenv("GEMINI_API_KEY")), "gemini_role": "optional: reads drawings and pictures only",
+               "models": bot_models(),
                "documents": []}
         if out["index"]:
             from rulemate.ingest import load_index
@@ -224,11 +270,24 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         from rulemate.ingest import ingest_dir
         from rulemate.retrieval import get_retriever
 
+        mlc = RULES / "MLC2006.md"
+        mlc_note = "loaded"
+        if not mlc.exists():
+            if os.getenv("COPILOT_FETCH_MLC", "1") == "1":
+                try:  # the ILO text is downloaded, not redistributed with the code
+                    from rulemate.ingest.mlc_fetch import fetch
+
+                    fetch(mlc)
+                    mlc_note = "downloaded from the ILO"
+                except Exception as exc:  # offline: everything else still works
+                    mlc_note = f"not available ({type(exc).__name__}); run scripts/fetch_mlc.py when online"
+            else:
+                mlc_note = "not downloaded (COPILOT_FETCH_MLC=0)"
         res = ingest_dir()
         r = get_retriever()
         table = get_rule_table(method="regex", force=True)
         out = {"documents": [d.doc for d in res.documents], "clauses": len(res.clauses), "retrieval": r.mode,
-               "limits": len(table.limits)}
+               "limits": len(table.limits), "mlc": mlc_note}
         _audit(who, "copilot.indexed", out)
         return out
 
@@ -241,17 +300,19 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         from rulemate.llm import get_llm
         from rulemate.retrieval import get_retriever
 
-        a = answer_question(body.question, retriever=get_retriever(), llm=get_llm(provider()), use_cache=True,
-                            docs=body.docs)
+        llm = bot_llm(body.model) if body.model and body.model != "auto" else get_llm(provider())
+        a = answer_question(body.question, retriever=get_retriever(), llm=llm, use_cache=True, docs=body.docs)
         general = None
         if a.status == "not_found":  # not in the loaded texts: answer from general knowledge, clearly labelled
             from rulemate.general import general_answer
 
-            general = general_answer(body.question, get_llm(provider()))
+            general = general_answer(body.question, llm, retriever=get_retriever())
         _audit(who, "copilot.asked", {"question": body.question, "status": a.status, "model": a.model,
                                       "cited": [c.uid for c in a.citations],
                                       "general": bool(general and general["ok"]),
-                                      "general_model": general["model"] if general else ""})
+                                      "general_model": general["model"] if general else "", "chosen_model": body.model or "auto",
+                                      "general_refs": [(r["source"], r["status"]) for r in general["references"]]
+                                      if general and general["ok"] else []})
         return {"question": a.question, "status": a.status, "badge": a.badge, "text": a.text, "model": a.model,
                 "general": general,
                 "note": a.note, "latency_ms": a.latency_ms, "rejected_attempts": a.rejected_attempts,
@@ -405,7 +466,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             if name.lower().endswith(".pdf"):
                 out = _read_drawing(data, name, page, llm)
             elif name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                out = _read_picture(data, name, llm, [d for d in docs.split(",") if d] or DEFAULT_DOCS)
+                out = _read_picture(data, name, llm, [d for d in docs.split(",") if d] or _loaded(DEFAULT_DOCS))
             else:
                 raise HTTPException(400, "upload a picture (.png, .jpg) or a drawing (.pdf)")
         except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words

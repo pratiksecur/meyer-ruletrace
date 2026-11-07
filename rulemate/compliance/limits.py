@@ -217,6 +217,11 @@ def validate(raw: dict, clause: Clause, n: int, method: str) -> tuple[Limit | No
     if "/" not in unit and any(_PER_PERSON.search(_sentence_at(clause.text, m.start())) for m in _value_spans(clause.text, value)):
         return None, f"{value:g} is a per-person quantity in the text; unit '{unit}' is not a rate"
 
+    spans = _value_spans(clause.text, value)
+    sent = _sentence_at(clause.text, spans[0].start()) if spans else clause.text
+    if re.search(r"\bshould\b", sent, re.I) and not re.search(r"\b(shall|must)\b", sent, re.I):
+        notes.append("guidance: the text says 'should' (e.g. MLC Part B), not a mandatory requirement")
+
     quote = raw.get("quote") or None
     if quote and _norm_text(quote) not in _norm_text(clause.text):
         quote = None  # keep the limit, drop the unverifiable quote
@@ -299,9 +304,10 @@ def extract_regex(c: Clause) -> list[dict]:
             subject = seg if len(re.findall(r"[A-Za-z]{3,}", seg)) >= 2 else (subject or c.title)
             last_end = m.end()
             q = re.match(r"^In ([^,]+),", sent)
+            by = _BY.match(sent[m.end():])  # "at least 198 centimetres by 80 centimetres": length and width
             out.append(
                 {
-                    "parameter": f"{c.title} {subject}".strip()[:120],
+                    "parameter": f"{c.title} {subject}{' length' if by else ''}".strip()[:120],
                     "subject": subject,
                     "qualifier": q.group(1) if q else None,
                     "condition": cond.group(0).strip(" .") if cond else None,
@@ -311,6 +317,47 @@ def extract_regex(c: Clause) -> list[dict]:
                     "quote": m.group(0),
                 }
             )
+            if by:
+                out.append({**out[-1], "parameter": f"{c.title} {subject} width".strip()[:120],
+                            "value": _num(by.group("val")), "unit": by.group("unit"),
+                            "quote": f"{m.group(0)}{by.group(0)}"})
+                last_end = m.end() + by.end()
+    out += _lead_list(c)
+    return out
+
+
+_BY = re.compile(rf"^\s+by\s+(?P<val>{_NUM_TOKEN})\s?(?P<unit>{UNIT_RX})(?![A-Za-z])", re.I)
+_LEAD = re.compile(r"(?P<cmp>not be less than|not less than|at least|no less than|not be more than|not more than|"
+                   r"not exceed|no more than)\s*:\s*$", re.I)
+_ITEM = re.compile(rf"^\((?:[ivx]+|[a-z])\)\s+(?P<val>{_NUM_TOKEN})\s?(?P<unit>{UNIT_RX})(?![A-Za-z])\s*(?P<rest>[^;]*)", re.I)
+
+
+def _lead_list(c: Clause) -> list[dict]:
+    """A lead-in ending "shall not be less than:" and one value per listed item, each with its own condition:
+    "(i) 4.5 square metres in ships of less than 3,000 gross tonnage;" (MLC A3.1 para 9(f))."""
+    out, lead = [], None
+    for line in c.text.splitlines():
+        if m := _LEAD.search(line):
+            lead = (m, line)
+            continue
+        if lead is None:
+            continue
+        it = _ITEM.match(line.strip())
+        if not it:
+            lead = None if not line.strip().startswith("(") else lead
+            continue
+        m, lead_line = lead
+        words = m.group("cmp").lower()
+        subject = re.sub(r"^\(\w+\)\s*", "", lead_line[: m.start()])
+        subject = re.sub(r"\b(shall|must|should)\b.*$", "", subject, flags=re.I).strip(" ,")
+        rest = it.group("rest").strip(" ;.,")
+        rest = re.sub(r"\s*(?:and|or)$", "", rest).strip(" ;.,")
+        out.append({
+            "parameter": f"{c.title} {subject}".strip()[:120], "subject": subject, "qualifier": None,
+            "condition": rest or None,
+            "comparator": ">=" if "less" in words or "least" in words else "<=",
+            "value": _num(it.group("val")), "unit": it.group("unit"),
+            "quote": f"{words} {it.group('val')} {it.group('unit')}"})
     return out
 
 

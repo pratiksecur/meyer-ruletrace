@@ -9,3 +9,5 @@ data/
 !ruletrace/samples/demo_ga_drawing.pdf
 # API keys (RuleMate Copilot: GEMINI_API_KEY)
 .env
+# ILO text (MLC 2006), downloaded by scripts/fetch_mlc.py or "Build the index", not redistributed
+ruletrace/copilot_rules/MLC2006.md

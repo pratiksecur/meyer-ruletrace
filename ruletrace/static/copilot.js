@@ -41,7 +41,9 @@ document.body.insertAdjacentHTML("beforeend", `
       <textarea id="cpQ" rows="3" placeholder="Ask anything. Rule questions are answered from the loaded regulations with checked citations; other questions get a labelled general answer."></textarea>
       <div class="ex" id="cpEx"></div>
       <div class="docs" id="cpDocs"></div>
-      <button class="primary" id="cpAsk" style="width:100%">Ask</button>
+      <div class="row"><label class="small" for="cpModel">Model</label><select id="cpModel" style="flex:1"></select></div>
+      <div class="small muted" id="cpModelAcc"></div>
+      <button class="primary" id="cpAsk" style="width:100%;margin-top:8px">Ask</button>
       <div id="cpAns"></div>
     </section>
     <section id="tab-check" hidden>
@@ -117,6 +119,14 @@ async function refresh() {
     $c("#cpBDoc").innerHTML = `<option value="">All documents</option>` + status.documents.map(d =>
       `<option value="${esc(d.doc)}">${esc(d.doc)}: ${esc(d.title)}</option>`).join("");
     $c("#cpDocs").dataset.done = "1";
+    const pct = v => v == null ? "?" : Math.round(v * 100) + "%";
+    $c("#cpModel").innerHTML = (status.models || []).map(m => `<option value="${esc(m.id)}" ${m.ready ? "" : "disabled"}>${esc(m.name)}${
+      m.accuracy ? ` · ${pct(m.accuracy.verified)} verified` : m.id === "auto" ? "" : " · not measured"}${m.ready ? "" : " (no key)"}</option>`).join("");
+    const accLine = () => { const m = (status.models || []).find(x => x.id === $c("#cpModel").value);
+      $c("#cpModelAcc").innerHTML = m?.accuracy ? `Measured on 38 test questions: ${pct(m.accuracy.verified)} of answers passed every check,
+        ${pct(m.accuracy.citation_precision)} of citations support their sentence, ${pct(m.accuracy.correct_not_found)} correct "not found". Answers that fail the checks are never shown as answers.`
+        : m?.id === "auto" ? "Groq's best model; the local model if Groq is unavailable. Every rule answer is checked in code, whatever the model." : ""; };
+    $c("#cpModel").onchange = accLine; accLine();
   }
 }
 async function build() {
@@ -139,7 +149,7 @@ async function ask() {
   const docs = [...document.querySelectorAll("#cpDocs input:checked")].map(i => i.value);
   $c("#cpAsk").disabled = true; $c("#cpAns").innerHTML = `<div class="ans muted">Searching the regulations…</div>`;
   try {
-    const a = await call("/ruletrace/copilot/ask", {method: "POST", body: {question: q, docs: docs.length ? docs : null}});
+    const a = await call("/ruletrace/copilot/ask", {method: "POST", body: {question: q, docs: docs.length ? docs : null, model: $c("#cpModel").value || null}});
     const label = {verified: "verified", excerpts: "excerpts only", not_found: "not found in the rules"}[a.status];
     $c("#cpAns").innerHTML = `<div class="ans">
       <div class="meta"><span class="badge2 ${a.status}">${label}</span><span>${esc(a.model || "no model needed")}</span>
@@ -153,6 +163,7 @@ async function ask() {
   } catch (e) { $c("#cpAns").innerHTML = `<div class="ans" style="color:var(--fail)">${esc(e.message)}</div>`; }
   finally { $c("#cpAsk").disabled = false; }
 }
+const refCls = s => s.startsWith("loaded") ? "ok" : s.startsWith("named") ? "warn" : "bad";
 const ACC_HINT = "91% of rule answers pass every check, 96% of citations support their sentence (see Accuracy)";
 function generalBox(a) {
   const g = a.general; if (!g) return "";
@@ -160,7 +171,17 @@ function generalBox(a) {
     <div class="small muted">${esc(g.error)}</div></div>`;
   return `<div class="ans gen"><div class="meta"><span class="badge2 general">general knowledge</span><span>${esc(g.model)}</span></div>
     <div class="warnline">${esc(g.label)}. Not checked against any rule text; accuracy not measured. Confirm in the governing rules before you use it in a design.</div>
+    ${(g.warnings || []).length ? `<ul class="gwarn">${g.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
     <div class="txt">${esc(g.text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")}</div>
+    <div class="lab2">Sources named by the model, checked in code ${g.certainty ? `· model's own certainty: ${esc(g.certainty)}` : ""}</div>
+    ${(g.references || []).length ? `<div class="refs">${g.references.map(r => `<div class="ref ${refCls(r.status)}">
+        <div><span class="rs">${esc(r.status)}</span> <b>${r.uid ? `<span class="cite" data-uid="${esc(r.uid)}">${esc(r.source)}</span>` : esc(r.source)}</b></div>
+        ${r.supports ? `<div class="small">for: ${esc(r.supports)}</div>` : ""}
+        <div class="small muted">${esc(r.why)}</div>
+        ${r.url ? `<div class="small"><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a> (official site, not opened by RuleMate)</div>` : ""}
+        ${r.url_dropped ? `<div class="small muted">A link to a non-official site was removed.</div>` : ""}</div>`).join("")}</div>`
+      : `<div class="small rej">No source named: do not rely on this answer.</div>`}
+    <div id="cpClause"></div>
     ${reviewBar("general_answer", a.question, {model: g.model}, "Engineer: is this answer usable?")}</div>`;
 }
 $c("#cpAsk").onclick = ask;
@@ -232,7 +253,17 @@ function readingsChart(pairs, title) {  // [[label, value, max]]
 // ---------- accuracy ----------
 async function accuracy() {
   try { const a = await call("/ruletrace/copilot/accuracy");
-    $c("#cpAcc").innerHTML = `<div class="small muted">Measured ${esc(a.measured)}. ${esc(a.how)}</div>` + a.groups.map(g =>
+    const M = a.models || [], pc = v => v == null ? "–" : Math.round(v * 100) + "%";
+    const best = M.length ? M.reduce((x, y) => (y.verified ?? -1) > (x.verified ?? -1) ? y : x) : null;
+    const mchart = M.length ? `<div class="chart"><div class="ct">Which bot model is most accurate?</div>
+      <div class="small muted">Same 38 questions for each model. Bars: answers that passed every check (verified). Hover for details.</div>
+      ${M.map(m => `<div class="vl" title="${esc(m.name)}: verified ${pc(m.verified)}, citations correct ${pc(m.citation_precision)}, key numbers ${pc(m.fact_recall)}, correct 'not found' ${pc(m.correct_not_found)}, median ${m.latency_p50_s ?? "?"} s">
+        <div class="vlh"><span>${m === best ? "★ " : ""}${esc(m.name)}</span><span><b>${pc(m.verified)}</b></span></div>
+        <div class="track"><span class="bar" style="width:${(m.verified || 0) * 100}%;background:var(--teal)"></span></div></div>`).join("")}
+      <table><tr><th>Model</th><th>Verified</th><th>Citations correct</th><th>Key numbers</th><th>"Not found" right</th><th>Median time</th></tr>
+      ${M.map(m => `<tr><td>${esc(m.name)}</td><td>${pc(m.verified)}</td><td>${pc(m.citation_precision)}</td><td>${pc(m.fact_recall)}</td><td>${pc(m.correct_not_found)}</td><td>${m.latency_p50_s ?? "–"} s</td></tr>`).join("")}</table>
+      ${best ? `<div class="small" style="margin-top:6px"><b>Most accurate: ${esc(best.name)}</b>. Whatever the model, an answer that fails the checks is shown as clause excerpts, never as an answer.</div>` : ""}</div>` : "";
+    $c("#cpAcc").innerHTML = `<div class="small muted">Measured ${esc(a.measured)}. ${esc(a.how)}</div>` + mchart + a.groups.map(g =>
       `<div class="chart"><div class="ct">${esc(g.name)}</div><div class="small muted">${esc(g.model)}</div>${g.items.map(i => i.value == null
         ? `<div class="small warnline">${esc(i.metric)}</div>`
         : `<div class="vl" title="${esc(i.metric)}: ${Math.round(i.value * 100)}% of ${i.n}${i.note ? " · " + esc(i.note) : ""}">
