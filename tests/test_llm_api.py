@@ -24,11 +24,16 @@ def _design(client):
 
 def test_explain_uses_model_or_falls_back_and_is_audited(client, monkeypatch):
     did = _design(client)
-    monkeypatch.setattr(llm_api, "get_client", lambda: Fake("Plain explanation with no numbers."))
+    def faithful(user):  # build a faithful four-part answer from the finding the endpoint sent
+        f = json.loads(user.removeprefix("<finding>").removesuffix("</finding>"))
+        return json.dumps({"requirement": f"{f['regime']} {f['ref']} requires {f['required']}.",
+                           "design_state": f"{f['element_name']} has {f['actual']}.",
+                           "why_it_matters": f["why_rule"] or "", "fix": f["fix"] or ""})
+    monkeypatch.setattr(llm_api, "get_client", lambda: Fake(faithful))
     r = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG, json={"limit": 3}).json()
     assert r["counts"]["fail"] >= 1 and 1 <= len(r["explanations"]) <= 3
-    assert all(e["source"] == "fake:test" for e in r["explanations"])
-    monkeypatch.setattr(llm_api, "get_client", lambda: Fake("It is 123456 mm too short."))
+    assert all(e["source"] == "fake:test" and e["parts"]["fix"] is not None for e in r["explanations"])
+    monkeypatch.setattr(llm_api, "get_client", lambda: Fake('{"requirement": "123456 mm", "design_state": "x"}'))
     r2 = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG, json={"limit": 2}).json()
     assert all(e["source"] == "rules" for e in r2["explanations"])
     assert client.get("/audit/verify", headers=ENG).json()["ok"]

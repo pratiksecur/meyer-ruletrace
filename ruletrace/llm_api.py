@@ -78,10 +78,12 @@ def add_llm_routes(app, router, engineer, path_of) -> None:
     @router.post("/rules/draft")
     def draft(body: DraftIn, who: Principal = Depends(engineer)) -> dict:
         client = get_client()
-        existing = {r.id for r in load_rules()}
+        pack = load_rules()
+        existing = {r.id for r in pack}
+        vocab = llm_assist.rule_vocabulary([r.__dict__ for r in pack])
         try:
             out = llm_assist.draft_rule(client, body.text, regime=body.regime, ref=body.ref,
-                                        source_url=body.source_url, existing_ids=existing)
+                                        source_url=body.source_url, existing_ids=existing, vocabulary=vocab)
         except llm_assist.LLMError as exc:
             raise HTTPException(502, f"language model failed: {exc}") from exc
         for d in out["drafts"]:          # the engine's own loader must accept it too

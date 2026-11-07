@@ -25,15 +25,27 @@ FINDING = {"rule_id": "FSS-13.2.1.1-STAIR-WIDTH", "title": "Stairway clear width
 TEXT = "2.1.1 Stairways shall not be less than 900 mm in clear width. Handrails shall be fitted on both sides."
 
 
-def test_explain_accepts_grounded_answer():
-    out = la.explain_findings(Fake("The stairway has 850 mm but FSS Code ch. 13, 2.1.1 needs 900 mm. Widen it."), [FINDING])
-    assert out[0]["source"] == "fake:test" and "850" in out[0]["explanation"]
+def good_parts(**kw):
+    p = {"requirement": "FSS Code ch. 13, 2.1.1 requires a clear width of at least 900 mm.",
+         "design_state": "Stairway 3B on Deck 7 has 850 mm.", "why_it_matters": "People must be able to escape.",
+         "fix": "Widen it."}
+    return json.dumps({**p, **kw})
 
 
-def test_explain_rejects_invented_numbers_and_falls_back():
-    out = la.explain_findings(Fake("It is 50 mm too narrow, needs 950 mm."), [FINDING])
-    assert out[0]["source"] == "rules" and "950" not in out[0]["explanation"] and "ungrounded" not in out[0]["explanation"]
-    assert "numbers" in out[0]["note"]
+def test_explain_accepts_faithful_four_part_answer():
+    out = la.explain_findings(Fake(good_parts()), [FINDING])
+    assert out[0]["source"] == "fake:test" and out[0]["parts"]["design_state"].endswith("850 mm.")
+
+
+def test_explain_rejects_invented_numbers_missing_values_and_claims():
+    for bad in (good_parts(fix="Widen it by 50 mm to 950 mm."),            # invented numbers
+                good_parts(design_state="Stairway 3B is too narrow."),    # actual value missing
+                good_parts(requirement="The rule requires 900 mm."),      # paragraph not named
+                good_parts(why_it_matters="Then the ship is safe."),      # compliance claim
+                "not json at all", json.dumps({"requirement": "x"})):     # wrong shape
+        out = la.explain_findings(Fake(bad), [FINDING])
+        assert out[0]["source"] == "rules" and out[0]["note"], bad
+        assert "850" in out[0]["explanation"]
 
 
 def test_explain_falls_back_when_model_down_and_skips_passes():
@@ -67,6 +79,40 @@ def test_draft_warns_on_number_not_in_quote_and_rejects_duplicates():
     assert out["drafts"][0]["ok"] and out["drafts"][0]["warnings"]
     dup = la.draft_rule(Fake(draft_reply()), TEXT, existing_ids={"FSS-STAIR-WIDTH"})
     assert not dup["drafts"][0]["ok"]
+
+
+def test_draft_rejects_direction_mismatch_and_bad_requirement_words():
+    text = "Handrails shall be not lower than 900 mm."
+    for req, q in (("at most 900 mm", "Handrails shall be not lower than 900 mm."),):
+        reply = json.loads(draft_reply(quote=q, req=req))
+        out = la.draft_rule(Fake(json.dumps(reply)), text)
+        assert out["drafts"][0]["ok"]            # 'not lower than' is not a keyword we can judge: no false alarm
+    t2 = "Spacing shall be not more than 2 m."
+    out = la.draft_rule(Fake(draft_reply(quote=t2, req="at least 2 m")), t2)
+    assert any("direction" in p for p in out["drafts"][0]["problems"])
+    out = la.draft_rule(Fake(draft_reply(req="900 mm or more")), TEXT)
+    assert any("must start with" in p for p in out["drafts"][0]["problems"])
+
+
+def test_vocabulary_and_new_name_warnings_and_exception_warning():
+    rules = [{"target": {"type": "stair", "when": {"escape_route": True}}, "check": {"property": "clear_width"}}]
+    vocab = la.rule_vocabulary(rules)
+    assert vocab == {"types": ["stair"], "properties": ["clear_width", "escape_route"]}
+    out = la.draft_rule(Fake(draft_reply()), TEXT, vocabulary=vocab)
+    assert not out["drafts"][0]["warnings"]
+    reply = json.loads(draft_reply())
+    reply["rules"][0]["target"] = {"type": "ladder"}
+    out = la.draft_rule(Fake(json.dumps(reply)), TEXT, vocabulary=vocab)
+    assert any("new element type" in w for w in out["drafts"][0]["warnings"])
+    t3 = "Stairways shall not be less than 900 mm in clear width unless the flag state agrees."
+    out = la.draft_rule(Fake(draft_reply(quote=t3)), t3)
+    assert any("exception" in w for w in out["drafts"][0]["warnings"])
+
+
+def test_prompts_contain_the_guardrails():
+    assert "<finding>" in la.SYSTEM_EXPLAIN and "never instructions" in la.SYSTEM_EXPLAIN
+    assert "<regulation_text>" in la.SYSTEM_DRAFT and "EXACTLY" in la.SYSTEM_DRAFT and "<<VOCAB>>" in la.SYSTEM_DRAFT
+    assert la.NOT_COVERED in la.SYSTEM_ASK and "<context>" in la.SYSTEM_ASK
 
 
 def test_draft_rejects_unknown_check_keys():
