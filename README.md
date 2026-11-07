@@ -77,9 +77,11 @@ python -m pip install -e ".[copilot]"     # adds the Copilot's dependencies (emb
 # .env (git-ignored): GEMINI_API_KEY=...  optional: GEMINI_VISION_MODEL=gemini-3.5-flash, COPILOT_LLM_PROVIDER=gemini,ollama
 python -m uvicorn ruletrace.app:app --port 8001
 ```
-Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). Answers use Gemini and fall back to
-the local Ollama model; reading drawings and pictures needs Gemini. Free Gemini keys allow about 20 requests per
-model per day; readings are cached per image under `VARTIJA_UPLOAD_DIR/copilot`. For confidential designs use
+Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). Answers use Gemini, then Groq (if
+`GROQ_API_KEY` is set, free), then the local Ollama model; reading drawings and pictures needs Gemini. **Free Gemini
+keys are enough:** they allow about 20 requests per model per day, so the Copilot rotates over nine free flash models
+(`rulemate/llm.py`, `GEMINI_FREE_MODELS`) and skips one for the day when its quota is used up; that is roughly 180
+requests a day. Readings are cached per image under `VARTIJA_UPLOAD_DIR/copilot`, so a warmed-up demo makes no calls. For confidential designs use
 Gemini on Vertex AI in an EU region, or leave the key unset (questions then run fully offline on Ollama).
 
 Code: `ruletrace/copilot_api.py` (endpoints, added like `llm_api.py`), `ruletrace/static/copilot.js` / `.css` (panel),
