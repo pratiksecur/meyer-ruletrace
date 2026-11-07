@@ -67,9 +67,9 @@
   title: Door sill height in a superstructure end bulkhead
   regime: Load Line
   ref: "ICLL 1966 Annex I, reg. 12(2)"
-  quote: ""
-  source_url: https://www.scribd.com/doc/279302535/Ui-Ll-Pdf900
-  verified: false
+  quote: "the height of the sills of access openings in bulkheads at ends of enclosed superstructures shall be at least 380 mm above the deck"
+  source_url: https://assets.publishing.service.gov.uk/media/644633e96dda69000d11e2e6/MSIS41_International_Load_Line_R05.23.pdf
+  verified: true      # checked against the consolidated ICLL text (UK MCA MSIS 41, Annex B, reg. 12(2))
   applies_if: {length_m_at_least: 24}
   target: {type: weather_door}
   check: {property: sill_height, requirement: "at least 380 mm"}
@@ -81,9 +81,9 @@
   title: Guard rail or bulwark height
   regime: Load Line
   ref: "ICLL 1966 Annex I, reg. 25(2)"
-  quote: ""
-  source_url: https://www.iso.org/standard/74627.html
-  verified: false
+  quote: "The height of the bulwarks or guard rails shall be at least 1 metre from the deck"
+  source_url: https://assets.publishing.service.gov.uk/media/644633e96dda69000d11e2e6/MSIS41_International_Load_Line_R05.23.pdf
+  verified: true      # checked against the consolidated ICLL text (UK MCA MSIS 41, Annex B, reg. 25(2))
   applies_if: {length_m_at_least: 24}
   target: {type: guard_rail}
   check: {property: height, requirement: "at least 1 m"}

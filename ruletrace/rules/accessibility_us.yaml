@@ -48,12 +48,12 @@
   title: Door threshold height
   regime: ADA
   ref: "2010 ADA Standards 404.2.5"
-  quote: "if a threshold is provided, Chapter 4 limits the height to 1/2-inch, maximum"
-  source_url: https://idighardware.com/2019/09/decoded-thresholds-and-changes-in-level-november-2019/
+  quote: "Thresholds, if provided at doorways, shall be 1/2 inch (13 mm) high maximum."
+  source_url: https://www.ada.gov/law-and-regs/design-standards/2010-stds/
   verified: true
   applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
   target: {type: [door, weather_door], when: {accessible_route: true}}
-  check: {property: threshold_height, requirement: "at most 13 mm"}
+  check: {property: threshold_height, requirement: "at most 12.7 mm"}   # 1/2 inch exactly; the standard prints the rounded "(13 mm)"
   severity: minor
   why: Higher sills stop wheelchairs; ships often need a ramped sill instead.
-  fix: Limit the threshold to 1/2 inch (13 mm) or add a compliant ramped sill.
+  fix: Limit the threshold to 1/2 inch (12.7 mm) or add a compliant ramped sill.

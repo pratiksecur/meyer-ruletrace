@@ -158,7 +158,7 @@ Some parts are covered by two rules that set opposite limits on the same physica
 and reports a **"Two regulations conflict"** finding naming both rules, their limits and why no value meets both.
 The sample *Demo cruise ship: open-deck door on an accessible route* shows the classic case: a weathertight door
 to the open deck that is also on the accessible route, where the Load Line Convention needs a sill of at least
-380 mm and the ADA a threshold of at most 13 mm (a door's sill and threshold are treated as one physical thing).
+380 mm and the ADA a threshold of at most 12.7 mm (1/2 inch) (a door's sill and threshold are treated as one physical thing).
 
 RuleTrace never decides which rule wins. The finding lists the usual ways out (change the design so both are met;
 precedence of mandatory flag-state rules over guidance and owner requirements, confirmed with the Administration;

@@ -89,7 +89,7 @@ def test_load_line_and_subdivision_rules_on_cargo_sample():
 
 
 def test_two_regulations_that_cannot_both_be_met_are_flagged():
-    """A weathertight door on an accessible route: Load Line wants a sill of at least 380 mm, ADA at most 13 mm."""
+    """A weathertight door on an accessible route: Load Line wants a sill of at least 380 mm, ADA at most 12.7 mm."""
     from pathlib import Path
     from ruletrace.engine import check_design
     from ruletrace.model import load_design

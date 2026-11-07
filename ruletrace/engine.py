@@ -281,7 +281,7 @@ def _bound(required: str):
 
 
 def find_conflicts(findings: list[dict], rules_by_id: dict) -> list[dict]:
-    """Parts where two applicable rules set limits that no single value can meet (e.g. sill >= 380 mm and <= 13 mm)."""
+    """Parts where two applicable rules set limits that no single value can meet (e.g. sill >= 380 mm and <= 12.7 mm)."""
     groups: dict[tuple, list[dict]] = {}
     for f in findings:
         if f.get("element_id") and f.get("property") and f.get("required"):
