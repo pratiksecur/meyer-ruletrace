@@ -20,7 +20,9 @@ h2:first-child{margin-top:0}
 button,select,input{font:inherit}button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;cursor:pointer}
 button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button:disabled{opacity:.5}
 .list .it{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list .it:hover{background:var(--bg)}
-.list .it.sel{border-color:var(--teal);background:#e8f4f4}.small{font-size:12px}.muted{color:var(--muted)}
+.list .it.sel{border-color:var(--teal);background:#e8f4f4}
+.list .it{position:relative}.list .it .rm{position:absolute;top:6px;right:6px;border:0;background:transparent;color:var(--muted);font-size:16px;line-height:1;padding:2px 6px;border-radius:6px}
+.list .it .rm:hover{background:#fbeaea;color:var(--fail)}.list .it b{padding-right:22px;display:block}.small{font-size:12px}.muted{color:var(--muted)}
 #view{position:relative;min-height:0;min-width:0;overflow:hidden;background:#e9eef2}
 #view canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}
 @media(min-width:1101px){html,body{overflow:hidden}}aside{min-height:0}
@@ -252,12 +254,36 @@ async function boot(){
   document.querySelectorAll("[data-sample]").forEach(e => e.onclick = guard(async () => {
     const d = await api(`/ruletrace/designs/sample/${e.dataset.sample}`, {method:"POST"}); toast("Sample loaded"); await boot(); await open(d.id); }));
   $("#designs").innerHTML = designs.length ? designs.map(d => `<div class="it ${current===d.id?"sel":""}" data-id="${esc(d.id)}">
-      <b>${esc(d.title || d.filename)}</b><div class="muted">${esc(d.format)} · ${d.elements} elements</div></div>`).join("")
+      <b>${esc(d.title || d.filename)}</b><div class="muted">${esc(d.format)} · ${d.elements} elements</div>
+      <button class="rm" data-rm="${esc(d.id)}" title="Remove this design" aria-label="Remove ${esc(d.title || d.filename)}">×</button></div>`).join("")
+      + (designs.length > 1 ? `<div style="text-align:right;margin-top:2px"><a href="#" id="rmAll" class="muted small">Remove all designs</a></div>` : "")
     : `<div class="muted">No designs yet. Load a sample below or upload a model.</div>`;
   document.querySelectorAll("[data-id]").forEach(e => e.onclick = guard(() => open(e.dataset.id)));
+  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = guard(async ev => {
+    ev.stopPropagation();
+    const d = designs.find(x => x.id === b.dataset.rm);
+    if (!confirm(`Remove "${d.title || d.filename}" from RuleTrace?\nIts past checks stay in the check history.`)) return;
+    await api(`/ruletrace/designs/${d.id}`, {method:"DELETE"});
+    if (current === d.id) clearView();
+    toast("Design removed"); await boot();
+  }));
+  if ($("#rmAll")) $("#rmAll").onclick = guard(async ev => {
+    ev.preventDefault();
+    if (!confirm(`Remove all ${designs.length} designs from RuleTrace?\nTheir past checks stay in the check history.`)) return;
+    for (const d of designs) await api(`/ruletrace/designs/${d.id}`, {method:"DELETE"});
+    clearView(); toast("All designs removed"); await boot();
+  });
   if (!designs.length && samples.length) $("#napp").open = false;
   const want = (location.hash.match(/design=([a-z0-9-]+)/) || [])[1];
   if (want && want !== current && designs.some(d => d.id === want)) { history.replaceState(null, "", location.pathname); await open(want); }
+}
+function clearView(){
+  current = null; result = null; selected = null; aiCache.clear();
+  scene.remove(group); group = new THREE.Group(); scene.add(group); meshes.clear(); dirty = true;
+  $("#counts").innerHTML = ""; $("#filters").innerHTML = ""; $("#na").innerHTML = ""; $("#meta").innerHTML = "";
+  $("#findings").innerHTML = `<div class="muted">Select or upload a design.</div>`;
+  $("#ship").className = "small muted"; $("#ship").textContent = "Select a design"; $("#interp").style.display = "none";
+  $("#start").style.display = "";
 }
 async function open(id, overrides){
   current = id; aiCache.clear();

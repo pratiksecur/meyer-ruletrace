@@ -266,6 +266,21 @@ def _relation(new: Rule, old: Rule) -> str | None:
     return ("stricter" if va > vb else "looser") if oa == ">=" else ("stricter" if va < vb else "looser")
 
 
+def _limit(r: Rule) -> dict | None:
+    """The fixed limit of a rule, for charts: {op, value, unit, base} (slopes as 1:N)."""
+    c = r.check
+    if "slope_max" in c:
+        n = float(str(c["slope_max"]).split(":")[1])
+        return {"op": "<=", "value": n, "unit": "1:N", "base": 1 / n, "label": f"1:{c['slope_max'].split(':')[1]}"}
+    if "requirement" not in c:
+        return None
+    try:
+        op, q = parse_requirement(str(c["requirement"]))
+    except QuantityError:
+        return None
+    return {"op": op, "value": q.value, "unit": q.unit, "base": q.base_value, "label": str(q)}
+
+
 def _req_text(r: Rule) -> str:
     c = r.check
     return c.get("requirement") or c.get("requirement_expr") or (f"not steeper than {c['slope_max']}" if "slope_max" in c else "") \
@@ -355,7 +370,11 @@ def analyze(drafts: list[dict], designs: list, current: list[Rule] | None = None
                          "target": etype, "extracted_by": d.get("extracted_by", ""), "kind": kind, "verdict": v,
                          "checked": s["checked"], "fail": s["fail"], "pass": s["pass"], "unknown": s["unknown"],
                          "hides": s["hides"][:10], "new_issues": s["new_issues"][:10],
-                         "related": [{"id": o.id, "relation": k, "requirement": _req_text(o)} for o, k in rel]})
+                         "related": [{"id": o.id, "relation": k, "requirement": _req_text(o)} for o, k in rel],
+                         "limit": _limit(r),
+                         "compare": [{"id": o.id, "relation": k, **(_limit(o) or {})} for o, k in rel if _limit(o)]
+                                    + [{"id": o.id, "relation": "conflict", "new_rule": True, **(_limit(o) or {})}
+                                       for o in internal if _limit(o)]})
     for b in broken:
         verdicts.append({**b, "kind": "flaw", "verdict": f"Broken: {b['problem']}", "checked": 0})
     counts = {k: sum(1 for v in verdicts if v["kind"] == k) for k in ("ok", "info", "warn", "gap", "flaw")}
