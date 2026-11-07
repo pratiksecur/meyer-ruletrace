@@ -120,3 +120,33 @@ def test_read_needs_gemini_key(indexed, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     r = indexed.post("/ruletrace/copilot/read", headers=ENG, files={"file": ("x.png", b"123", "image/png")})
     assert r.status_code == 503
+
+
+def test_check_values_against_the_full_texts(indexed):
+    rows = [{"space": "Accessible cabin bathroom", "parameter": "door clear width", "value": "30", "unit": "in"},
+            {"space": "Accessible cabin", "parameter": "turning space diameter", "value": "1500", "unit": "mm"},
+            {"space": "Interior stairway", "parameter": "stairway clear width", "value": "2'-6\""}]
+    r = indexed.post("/ruletrace/copilot/check", headers=ENG, json={"rows": rows}).json()
+    v = {x["parameter"]: x for x in r["results"]}
+    assert v["door clear width"]["verdict"] == "FAIL" and "404.2.3" in v["door clear width"]["deciding"]["clause"]
+    assert v["turning space diameter"]["verdict"] == "FAIL"  # 1500 mm = 59.06 in < 60 in (304.3.1)
+    assert v["stairway clear width"]["verdict"] == "PASS"  # 2'-6" = 30 in >= 28 in (46 CFR 190.10-25(b))
+    assert indexed.get("/audit/verify", headers=ENG).json()["ok"]
+
+
+def test_check_example_csv(indexed):
+    csv = indexed.get("/ruletrace/copilot/example.csv", headers=ENG).text
+    r = indexed.post("/ruletrace/copilot/check/csv", headers=ENG, data={"docs": "36CFR1191AppD"},
+                     files={"file": ("example.csv", csv.encode(), "text/csv")}).json()
+    assert r["counts"] == {"PASS": 5, "FAIL": 4, "NEEDS REVIEW": 0}
+
+
+def test_browse_search_and_clause_navigation(indexed):
+    out = indexed.get("/ruletrace/copilot/browse?doc=46CFR190", headers=ENG).json()
+    assert out["mode"] == "outline" and any(x["clause_id"] == "190.10-25(b)" for x in out["items"])
+    hits = indexed.get("/ruletrace/copilot/browse?q=guard rail height", headers=ENG).json()["items"]
+    assert any(h["clause_id"] == "190.25-5(a)" for h in hits[:5])
+    c = indexed.get("/ruletrace/copilot/clause/46CFR190::190.10-25", headers=ENG).json()
+    assert [x["clause_id"] for x in c["children"]] == ["190.10-25(a)", "190.10-25(b)", "190.10-25(c)"]
+    b = indexed.get("/ruletrace/copilot/clause/46CFR190::190.10-25(b)", headers=ENG).json()
+    assert b["parent"]["clause_id"] == "190.10-25" and "28 inches" in b["text"]

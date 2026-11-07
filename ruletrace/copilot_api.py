@@ -7,7 +7,11 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
     POST /ruletrace/copilot/index           build the clause index of the full regulation texts (once, ~30 s)
     POST /ruletrace/copilot/ask             question -> answer citing clauses of the official texts; every
                                             citation, number and quote checked in code, or "not found"
-    GET  /ruletrace/copilot/clause/{uid}    the full text of a cited clause
+    GET  /ruletrace/copilot/clause/{uid}    a clause with its parent, sub-clauses, references and referenced-by
+    GET  /ruletrace/copilot/browse          clauses of a document (outline), or a search over the full texts
+    POST /ruletrace/copilot/check           design values (space, parameter, value, unit) -> PASS / FAIL / NEEDS
+                                            REVIEW against limits taken from the full texts; computed in code
+    POST /ruletrace/copilot/check/csv       the same from a CSV upload;  GET /ruletrace/copilot/example.csv
     POST /ruletrace/copilot/read            a picture (png/jpg) or a drawing page (pdf, also scanned): Gemini reads
                                             it, code confirms every reading on the image; picture values are
                                             checked against the full texts
@@ -29,6 +33,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from vartija_core import audit
 from vartija_core.api import Principal
@@ -41,6 +46,12 @@ MAX_PDF_PAGES = 400
 class AskIn(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
     docs: list[str] | None = Field(default=None, description="Rule documents to search; default all")
+
+
+class CheckIn(BaseModel):
+    rows: list[dict] = Field(min_length=1, max_length=500,
+                             description="item_id, space, parameter, value (e.g. 30, 2'-6\", 1500), unit, source")
+    docs: list[str] | None = None
 
 
 class DesignIn(BaseModel):
@@ -189,16 +200,99 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                 "citations": [{"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title,
                                "page": c.page} for c in a.citations]}
 
-    @router.get("/copilot/clause/{uid:path}")
-    def clause(uid: str, who: Principal = Depends(engineer)) -> dict:
+    def _ready():
         _require()
+        if not _index_ready():
+            raise HTTPException(409, "build the Copilot index first (POST /ruletrace/copilot/index)")
         from rulemate.retrieval import get_retriever
 
-        c = get_retriever().by_uid.get(uid)
+        return get_retriever()
+
+    @router.get("/copilot/clause/{uid:path}")
+    def clause(uid: str, who: Principal = Depends(engineer)) -> dict:
+        r = _ready()
+        c = r.by_uid.get(uid)
         if c is None:
             raise HTTPException(404, "no such clause")
+        ref = lambda x: {"uid": x.uid, "clause_id": x.clause_id, "title": x.title}  # noqa: E731
+        parent = r.by_uid.get(f"{c.doc}::{c.parent_id}") if c.parent_id else None
         return {"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title, "text": c.text,
-                "path": c.path, "refs": c.refs}
+                "page": c.page, "path": c.path, "kind": c.kind,
+                "parent": ref(parent) if parent else None,
+                "children": [ref(x) for x in r.children.get(c.uid, [])],
+                "refs": [ref(x) for x in (r.by_uid.get(f"{c.doc}::{i}") for i in c.refs) if x],
+                "referenced_by": [ref(x) for x in r.clauses if x.doc == c.doc and c.clause_id in x.refs]}
+
+    @router.get("/copilot/browse")
+    def browse(doc: str = "", q: str = "", who: Principal = Depends(engineer)) -> dict:
+        r = _ready()
+        if q.strip():
+            res = r.search(q, k=12, docs=[doc] if doc else None)
+            return {"mode": "search", "confidence": res.confidence, "items": [
+                {"uid": h.clause.uid, "doc": h.clause.doc, "clause_id": h.clause.clause_id, "title": h.clause.title,
+                 "kind": h.clause.kind, "how": h.source, "score": round(h.cosine or h.score, 3),
+                 "snippet": h.clause.text[:160]} for h in res.hits]}
+        items = [c for c in r.clauses if not doc or c.doc == doc]
+        return {"mode": "outline", "items": [
+            {"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title, "kind": c.kind,
+             "depth": len(c.path), "snippet": "" if c.kind == "heading" else c.text[:120]} for c in items]}
+
+    def _check(rows, docs) -> dict:
+        from rulemate.compliance.service import check_rows
+
+        results = check_rows(rows, docs=docs or None)
+        out = []
+        for res in results:
+            ap = res.applied
+            failed = [x for x in ap if x.outcome == "fail" and x.role == "applied"]
+            def margin(x):
+                v = x.value_in_limit_unit
+                return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
+            dec = failed[0] if failed else (min(ap, key=margin) if ap else None)
+            out.append({"item_id": res.row.item_id, "space": res.row.space, "parameter": res.row.parameter,
+                        "value": res.row.display, "verdict": res.verdict, "reason": res.reason,
+                        "deciding": ({"limit": dec.limit.describe(), "uid": dec.limit.clause_uid,
+                                      "clause": f"{dec.limit.doc} § {dec.limit.clause_id}"} if dec else None),
+                        "source": res.row.source})
+        counts = {v: sum(x["verdict"] == v for x in out) for v in ("PASS", "FAIL", "NEEDS REVIEW")}
+        return {"counts": counts, "results": out, "docs": docs or "all"}
+
+    @router.post("/copilot/check")
+    def check_values(body: CheckIn, who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from rulemate.compliance.check import DesignRow
+        from rulemate.compliance.units import parse_value
+
+        rows = []
+        for i, d in enumerate(body.rows, start=1):
+            raw = str(d.get("value", "")).strip()
+            value, unit = parse_value(raw, str(d.get("unit") or "").strip())
+            if not str(d.get("parameter") or "").strip():
+                raise HTTPException(400, f"row {i}: parameter is required")
+            rows.append(DesignRow(item_id=str(d.get("item_id") or f"V{i}"), space=str(d.get("space") or ""),
+                                  parameter=str(d["parameter"]), value=value, unit=unit, raw_value=raw,
+                                  source=str(d.get("source") or "entered in RuleTrace")))
+        out = _check(rows, body.docs)
+        _audit(who, "copilot.checked", {"rows": len(rows), "counts": out["counts"], "docs": body.docs})
+        return out
+
+    @router.post("/copilot/check/csv")
+    async def check_csv(file: UploadFile = File(...), docs: str = Form(default=""),
+                        who: Principal = Depends(engineer)) -> dict:
+        _ready()
+        from rulemate.compliance.check import read_design_csv
+
+        try:
+            rows = read_design_csv(await file.read())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        out = _check(rows, [d for d in docs.split(",") if d])
+        _audit(who, "copilot.checked", {"file": Path(file.filename or "").name, "rows": len(rows), "counts": out["counts"]})
+        return out
+
+    @router.get("/copilot/example.csv", response_class=PlainTextResponse)
+    def example_csv(who: Principal = Depends(engineer)) -> str:
+        return (RULES / "accessible_stateroom_example.csv").read_text(encoding="utf-8")
 
     @router.post("/copilot/read")
     async def read(file: UploadFile = File(...), page: int = Form(default=1), docs: str = Form(default=""),
