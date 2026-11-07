@@ -45,6 +45,20 @@ def test_citation_is_added_by_code_when_model_omits_it():
     assert again[0]["parts"]["requirement"].count("2.1.1") == 1     # not duplicated when the model has it
 
 
+def test_cache_repeats_accepted_answers_only():
+    calls = []
+    def reply(user):
+        calls.append(1)
+        return good_parts()
+    cache = {}
+    a = la.explain_findings(Fake(reply), [FINDING], cache=cache)
+    b = la.explain_findings(Fake(reply), [FINDING], cache=cache)
+    assert len(calls) == 1 and b[0].get("cached") and b[0]["parts"] == a[0]["parts"]
+    bad_cache = {}
+    la.explain_findings(Fake("not json"), [FINDING], cache=bad_cache)
+    assert bad_cache == {}                      # a fallback is never cached
+
+
 def test_explain_rejects_invented_numbers_missing_values_and_claims():
     for bad in (good_parts(fix="Widen it by 50 mm to 950 mm."),            # invented numbers
                 good_parts(design_state="Stairway 3B is too narrow."),    # actual value missing
@@ -99,6 +113,27 @@ def test_draft_rejects_direction_mismatch_and_bad_requirement_words():
     assert any("direction" in p for p in out["drafts"][0]["problems"])
     out = la.draft_rule(Fake(draft_reply(req="900 mm or more")), TEXT)
     assert any("must start with" in p for p in out["drafts"][0]["problems"])
+
+
+def test_draft_rejects_ratio_in_requirement_but_accepts_slope_max():
+    text = "Ramp runs shall have a running slope not steeper than 1:12."
+    reply = json.loads(draft_reply(quote=text))
+    reply["rules"][0]["target"] = {"type": "ramp"}
+    reply["rules"][0]["check"] = {"property": "running_slope", "requirement": "at most 1:12"}
+    out = la.draft_rule(Fake(json.dumps(reply)), text)
+    assert not out["drafts"][0]["ok"] and any("slope_max" in p for p in out["drafts"][0]["problems"])
+    reply["rules"][0]["check"] = {"property": "running_slope", "slope_max": "1:12"}
+    assert la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"]
+    for ok_req in ("at least 7.5 m2", "at least 900 mm", "at most 2", "at least 4,5 m\u00b2"):
+        reply["rules"][0]["check"] = {"property": "x", "requirement": ok_req}
+        assert la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"], ok_req
+    reply["rules"][0]["check"] = {"property": "x", "requirement": "at most about 1 metre"}
+    assert not la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"]
+
+
+def test_model_declining_is_reported_not_treated_as_a_draft():
+    out = la.draft_rule(Fake(json.dumps({"rules": [], "unclear": "no testable condition"})), TEXT)
+    assert out["drafts"] == [] and out["unclear"] == "no testable condition" and out["yaml"] == ""
 
 
 def test_vocabulary_and_new_name_warnings_and_exception_warning():

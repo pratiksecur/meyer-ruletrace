@@ -83,7 +83,7 @@ def round_trip(client, rules: list[dict], limit: int | None) -> dict:
     vocab = la.rule_vocabulary(rules)
     # Only rules that quote a regulation and test one element; drawing-consistency rules have no quote to restate.
     rules = [r for r in rules if r.get("quote") and (r.get("target") or {}).get("type") not in (None, "ship")]
-    rows, counts = [], dict(produced=0, quote_ok=0, type=0, prop=0, kind=0, req=0, req_total=0)
+    rows, counts = [], dict(declined=0, produced=0, quote_ok=0, type=0, prop=0, kind=0, req=0, req_total=0)
     for r in (rules[:limit] if limit else rules):
         row = {"rule_id": r["id"]}
         try:
@@ -93,6 +93,11 @@ def round_trip(client, rules: list[dict], limit: int | None) -> dict:
             rows.append(row)
             continue
         good = [d for d in out["drafts"] if d["ok"]]
+        if not out["drafts"]:
+            row["declined"] = out["unclear"] or "no rule drafted"   # the model chose not to draft: counted separately
+            counts["declined"] += 1
+            rows.append(row)
+            continue
         if not good:
             row["problems"] = [p for d in out["drafts"] for p in d["problems"]] or [out["unclear"] or "no rule drafted"]
             rows.append(row)
@@ -111,6 +116,8 @@ def round_trip(client, rules: list[dict], limit: int | None) -> dict:
         rows.append({"rule_id": r["id"], "draft_check": d["check"], "gold_check": gc})
     n = len(rules[:limit] if limit else rules)
     return {"rules_tried": n, "usable_draft": pct(counts["produced"], n),
+            "declined_by_model": pct(counts["declined"], n),
+            "rejected_by_checks": pct(n - counts["produced"] - counts["declined"], n),
             "target_type_matches_gold": pct(counts["type"], counts["produced"]),
             "property_matches_gold": pct(counts["prop"], counts["produced"]),
             "check_kind_matches_gold": pct(counts["kind"], counts["produced"]),
@@ -191,6 +198,7 @@ def main() -> None:
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--json")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--only", choices=["explain", "fixes", "whatif", "draft"], help="run just one model test (faster to iterate)")
     a = ap.parse_args()
     rules = [r.__dict__ for r in load_rules()]
     report = {"rules_in_pack": len(rules), "retrieval": retrieval(rules), "fixes_without_model": fixes(None)}
@@ -202,15 +210,26 @@ def main() -> None:
             sys.exit("Ollama is not ready; fix that or use --no-llm")
         t = time.time()
         report["model"] = client.name
-        report["explanations"] = explanations(client, limit_per_design=a.limit or 6)
-        report["fixes_with_model"] = fixes(client)
-        report["whatif"] = whatif(client)
-        report["rule_drafting_round_trip"] = round_trip(client, rules, a.limit)
+        if a.only in (None, "explain"):
+            report["explanations"] = explanations(client, limit_per_design=a.limit or 6)
+        if a.only in (None, "fixes"):
+            report["fixes_with_model"] = fixes(client)
+        if a.only in (None, "whatif"):
+            report["whatif"] = whatif(client)
+        if a.only in (None, "draft"):
+            report["rule_drafting_round_trip"] = round_trip(client, rules, a.limit)
         report["seconds"] = round(time.time() - t)
     print(json.dumps({k: v for k, v in report.items() if k != "rule_drafting_round_trip"}, indent=2))
     if "rule_drafting_round_trip" in report:
         rt = {k: v for k, v in report["rule_drafting_round_trip"].items() if k != "rows"}
         print(json.dumps({"rule_drafting_round_trip": rt}, indent=2))
+        for row in report["rule_drafting_round_trip"]["rows"]:      # why drafts were rejected, or what differed
+            if "declined" in row:
+                print("DECLINED", row["rule_id"], "->", row["declined"])
+            elif "problems" in row or "error" in row:
+                print("REJECTED", row["rule_id"], "->", row.get("problems") or row.get("error"))
+            elif row["draft_check"] != row["gold_check"]:
+                print("DIFFERS ", row["rule_id"], "\n   draft:", row["draft_check"], "\n   gold: ", row["gold_check"])
     if a.json:
         Path(a.json).write_text(json.dumps(report, indent=2), encoding="utf-8")
         print("saved", a.json)
