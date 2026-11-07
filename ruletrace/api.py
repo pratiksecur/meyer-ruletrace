@@ -244,4 +244,7 @@ def make_router(app) -> APIRouter:
             result["audit_seq"] = entry.seq
         return result
 
+    from .llm_api import add_llm_routes  # local-LLM helpers (explain, draft rule, ask)
+    add_llm_routes(app, router, engineer, _path)
+
     return router
