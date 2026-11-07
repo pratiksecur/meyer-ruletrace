@@ -72,6 +72,7 @@ textarea{width:100%;font:inherit;font-size:12.5px;border:1px solid var(--line);b
 pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-size:11.5px;overflow:auto;max-height:260px;white-space:pre}
 .filters{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}.filters button{padding:3px 8px;font-size:12px}.filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 </style>
+<link rel="stylesheet" href="/ruletrace/static/copilot.css">
 </head>
 <body>
 <header>
@@ -626,7 +627,8 @@ function detail(f){
     <div class="small"><span class="badge ${f.verified?"":"unv"}">${f.verified?"value checked against published text":"value not yet verified: confirm with the official text"}</span>
     ${f.source_url ? ` <a href="${esc(f.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</div>
     ${f.status === "fail" || f.status === "warn" ? aiBlock(f) : ""}
-    ${f.status !== "pass" ? reviewBlock(f) : ""}`;
+    ${f.status !== "pass" ? reviewBlock(f) : ""}
+    <button class="aib" data-ask-rule="${esc(f.rule_id)}">Ask the regulations (Copilot)</button>`;
 }
 function select(i){
   selected = i; renderFindings();
@@ -695,7 +697,10 @@ $("#dGo").onclick = guard(async () => {
 });
 $("#who").addEventListener("change", aiStatus);
 aiStatus();
+// bridge for the RuleMate Copilot panel (static/copilot.js): same login headers, open a design, current result
+window.RuleTrace = {headers, open, boot, toast, get result(){ return result; }, get current(){ return current; }};
 guard(boot)();
 </script>
+<script type="module" src="/ruletrace/static/copilot.js"></script>
 </body>
 </html>

@@ -54,6 +54,35 @@ Also built in:
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
 - Built on **Vartija core** (prior work; feature freeze at tag `pre-event-2026-11-05`, installed from release `v0.2.0`, which only adds a packaging fix): login and roles, audit hash chain, document sources. RuleTrace uses only Vartija's public API (`create_app`, `Principal`, `current_principal`, `audit.append`, `quantities.parse_quantity` / `check_requirement`, `settings.Settings`).
 
+## RuleMate Copilot: ask the regulations, read drawings with Gemini
+
+A side panel in the 3D viewer (**✦ Copilot** in the header, or **Ask the regulations** on any finding). It adds
+two things the rule pack cannot do on its own, behind the same login, roles and audit chain:
+
+| Tab | What it does | How it stays trustworthy |
+| --- | --- | --- |
+| **Ask the regulations** | Answers questions from the **full official texts** (46 CFR Part 190 for research vessels and the ADA/ABA technical requirements, 825 clauses, public domain, in `ruletrace/copilot_rules/`), with clause citations you can click open. | Every sentence must cite a retrieved clause that supports it; every number, unit and quote must be in that clause; otherwise the clause excerpts are shown, or "not found in the rules". Checked in code, not by the model. |
+| **Read with Gemini** | A **picture** (screenshot from the design tool, sketch, photo with dimensions) or a **drawing page** (PDF, including **scanned** drawings, which the GA reader rejects). Pictures: every written value is checked against the full texts (e.g. a 1500 mm turning circle = 59.06 in, ADA 304.3.1 needs 60 in: FAIL). Drawings: the cabins and hospital become a RuleTrace design, checked by the rule engine and shown in 3D. | Gemini only proposes. A reading is used only when local OCR finds its label, number or value on the image at the position Gemini reports; berths only when the drawing states them ("CREW DOUBLE", "SCIENTIST (2)"). Everything else is shown as "Gemini only" and not used. PASS/FAIL comes from code. |
+
+Tested on the brief's public drawings (not in this repo, owners' notices): the scanned 1990 NOAA research-ship
+study, second deck: 34 of 34 cabins and the hospital read and confirmed; the rule engine then passes
+MLC A3.1 para 12 (hospital) and fails the berth total (57 stated on the plan vs 60 persons: one room has no
+berth number). The RCRV GA (vector CAD): 143 of 160 labels confirmed; 8 science and 7 + 3 crew cabins match the
+RCRV design summary.
+
+```bash
+python -m pip install -e ".[copilot]"     # adds the Copilot's dependencies (embeddings, OCR, units)
+# .env (git-ignored): GEMINI_API_KEY=...  optional: GEMINI_VISION_MODEL=gemini-3.5-flash, COPILOT_LLM_PROVIDER=gemini,ollama
+python -m uvicorn ruletrace.app:app --port 8001
+```
+Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). Answers use Gemini and fall back to
+the local Ollama model; reading drawings and pictures needs Gemini. Free Gemini keys allow about 20 requests per
+model per day; readings are cached per image under `VARTIJA_UPLOAD_DIR/copilot`. For confidential designs use
+Gemini on Vertex AI in an EU region, or leave the key unset (questions then run fully offline on Ollama).
+
+Code: `ruletrace/copilot_api.py` (endpoints, added like `llm_api.py`), `ruletrace/static/copilot.js` / `.css` (panel),
+`rulemate/` (retrieval, answer checks, rule-text parsers, unit-aware checks, Gemini readers), `tests/test_copilot.py`.
+
 ## Deployment
 
 ### Local (Windows / macOS / Linux), about 5 minutes

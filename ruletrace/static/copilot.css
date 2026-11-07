@@ -1,0 +1,41 @@
+/* RuleMate Copilot panel (ask the full regulations, read drawings and pictures with Gemini) */
+header .cpbtn{background:#1e6fa8;border:0;color:#fff;border-radius:7px;padding:5px 11px;font-weight:600;cursor:pointer}
+header .cpbtn:hover{background:#2a82c2}
+.cp{position:fixed;top:0;right:0;bottom:0;width:min(470px,100vw);background:var(--card);z-index:8;
+  box-shadow:-8px 0 30px #0b254533;display:flex;flex-direction:column;transform:translateX(105%);transition:transform .2s ease}
+.cp.open{transform:none}
+.cp .top{background:var(--navy);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px}
+.cp .top b{font-size:15px}.cp .top .sp{flex:1}.cp .top button{background:transparent;border:0;color:#cfe3ff;font-size:20px;padding:0 4px}
+.cp .tagline{font-size:11.5px;color:#b9c7d8}
+.cp .tabs{display:flex;border-bottom:1px solid var(--line)}
+.cp .tabs button{flex:1;border:0;border-radius:0;padding:10px;background:#fff;color:var(--muted);font-weight:600;border-bottom:3px solid transparent}
+.cp .tabs button.on{color:var(--ink);border-bottom-color:var(--teal)}
+.cp .body{flex:1;overflow:auto;padding:14px}
+.cp .state{font-size:12px;color:var(--muted);margin-bottom:10px}
+.cp .ex{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 10px}.cp .ex button{font-size:11.5px;padding:3px 8px;border-radius:999px}
+.cp .docs{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;margin:6px 0}
+.cp .ans{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px;background:#fff}
+.cp .ans .meta{display:flex;gap:8px;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:6px;flex-wrap:wrap}
+.cp .ans .txt{white-space:pre-wrap;font-size:13.5px}
+.cp .badge2{font-size:11px;font-weight:600;border-radius:999px;padding:2px 8px;color:#fff}
+.cp .badge2.verified{background:var(--pass)}.cp .badge2.excerpts{background:var(--warn)}.cp .badge2.not_found{background:var(--unknown)}
+.cp .cite{display:inline-block;background:#e8f1fb;color:#0b4f7c;border:1px solid #b8d4ee;border-radius:6px;padding:0 5px;
+  font-size:12px;cursor:pointer;margin:0 1px;white-space:nowrap}
+.cp .clause{border-left:3px solid var(--teal);background:#f3f8f8;padding:8px 10px;margin-top:8px;font-size:12.5px;border-radius:0 8px 8px 0}
+.cp .clause .h{font-weight:600;margin-bottom:4px}
+.cp .how{font-size:11.5px;color:var(--muted);margin-top:8px;border-top:1px dashed var(--line);padding-top:6px}
+.cp .drop{border:2px dashed var(--line);border-radius:10px;padding:12px;text-align:center;font-size:12.5px;color:var(--muted)}
+.cp .row{display:flex;gap:6px;align-items:center;margin-top:8px}.cp .row input[type=number]{width:70px}
+.cp img.prev{width:100%;border:1px solid var(--line);border-radius:8px;margin-top:10px}
+.cp .item{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-top:8px;cursor:pointer}
+.cp .item:hover{border-color:#b8c4ce}.cp .item .h{display:flex;gap:8px;align-items:baseline}.cp .item .t{flex:1;font-weight:600;font-size:13px}
+.cp .item img{width:100%;border-radius:6px;margin-top:6px;border:1px solid var(--line)}
+.cp .item pre{white-space:pre-wrap;font:12px/1.4 system-ui;margin:6px 0 0;color:#384552}
+.cp table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.cp th,.cp td{text-align:left;padding:4px 5px;border-bottom:1px solid var(--line);vertical-align:top}
+.cp .ok{color:var(--pass);font-weight:600}.cp .no{color:var(--muted)}
+.cp .ship{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.cp .ship input,.cp .ship select{width:100%}
+.cp .sum{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.cp .sum div{background:var(--bg);border-radius:8px;padding:6px;text-align:center;font-size:11.5px}.cp .sum b{display:block;font-size:18px}
+.cp [hidden]{display:none!important}
+.cp .txt blockquote{margin:4px 0;border-left:3px solid var(--line);padding:2px 8px;color:#384552}

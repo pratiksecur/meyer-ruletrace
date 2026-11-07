@@ -7,3 +7,5 @@ data/
 # third-party drawings stay out of git (owners' notices); the synthetic sample is allowed
 *.pdf
 !ruletrace/samples/demo_ga_drawing.pdf
+# API keys (RuleMate Copilot: GEMINI_API_KEY)
+.env
