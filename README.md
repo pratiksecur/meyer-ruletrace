@@ -86,7 +86,7 @@ ollama pull llama3.2:3b                   # the local bot model (confidential mo
 python -m uvicorn ruletrace.app:app --port 8001
 ```
 Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s; it also downloads the Maritime
-Labour Convention 2006 from the ILO, which is not committed: `scripts/fetch_mlc.py` does the same offline-first).
+Labour Convention 2006 from the ILO, which is not committed; `scripts/fetch_mlc.py` does the same from the command line).
 
 **Confidential mode is ON by default (for Meyer designs): nothing leaves this computer.** The bot answers with the
 local Ollama model only; Groq and Gemini are off even if their keys are set (the server refuses them, and the panel
