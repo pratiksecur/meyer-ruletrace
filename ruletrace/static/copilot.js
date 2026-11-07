@@ -170,16 +170,23 @@ $c("#cpRead").onclick = async () => {
   const fd = new FormData(); fd.append("file", f); fd.append("page", $c("#cpPage").value || "1");
   $c("#cpRead").disabled = true; $c("#cpOut").innerHTML = `<div class="ans muted">Gemini is reading ${esc(f.name)}; code is confirming each reading… (up to a minute)</div>`;
   try { const r = await call("/ruletrace/copilot/read", {method: "POST", body: fd});
-        r.kind === "picture" ? showPicture(r) : showDrawing(r); }
+        r.kind === "picture" ? showPicture(r) : r.kind === "drawing" ? showDrawing(r)
+          : ($c("#cpOut").innerHTML = inShort(r.in_short)); }
   catch (e) { $c("#cpOut").innerHTML = `<div class="ans" style="color:var(--fail)">${esc(e.message)}</div>`; }
   finally { $c("#cpRead").disabled = false; }
 };
+function inShort(sm) {
+  if (!sm) return "";
+  return `<div class="short"><div class="lab">In short</div><b>${esc(sm.headline)}</b>
+    ${sm.points?.length ? `<ul>${sm.points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
+    ${sm.next?.length ? `<div class="lab" style="margin-top:6px">What to do next</div><ul>${sm.next.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}</div>`;
+}
 const pill = v => v ? `<span class="pill ${v === "PASS" ? "pass" : v === "FAIL" ? "fail" : v === "NO RULE" || v === "CHECK INPUT" ? "unknown" : "warn"}"
   title="${v === "NO RULE" ? "None of the loaded rule texts limits this value" : v === "NEEDS REVIEW" ? "A rule applies, but a condition must be confirmed" : v === "CHECK INPUT" ? "The value is not a number or has no unit" : ""}">${esc(v)}</span>`
   : `<span class="pill unknown">not checked</span>`;
 function showPicture(r) {
   const counts = ["PASS", "FAIL", "NEEDS REVIEW"].map(v => r.items.filter(i => i.verdict === v).length);
-  $c("#cpOut").innerHTML = `<div class="sum"><div><b>${r.n_confirmed}/${r.n_readings}</b>values confirmed</div>
+  $c("#cpOut").innerHTML = inShort(r.in_short) + `<div class="sum"><div><b>${r.n_confirmed}/${r.n_readings}</b>values confirmed</div>
       <div><b style="color:var(--fail)">${counts[1]}</b>fail</div><div><b style="color:var(--pass)">${counts[0]}</b>pass</div></div>
     <img class="prev" src="${r.preview}" alt="">
     ${r.items.map((it, i) => `<div class="item" data-i="${i}"><div class="h"><span class="t">${esc(it.parameter)}: ${esc(it.written)}</span>${pill(it.verdict)}</div>
@@ -192,22 +199,27 @@ function showPicture(r) {
 function showDrawing(r) {
   lastDrawing = r;
   const rooms = r.items.filter(i => ["stateroom", "hospital", "stairway"].includes(i.kind));
-  $c("#cpOut").innerHTML = `<div class="sum"><div><b>${r.n_confirmed}/${r.n_readings}</b>readings confirmed</div>
-      <div><b>${r.summary.cabins}</b>cabins (${r.summary.berths_confirmed} berths stated)</div><div><b>${r.summary.hospital ? "yes" : "no"}</b>hospital</div></div>
+  const enough = r.summary.cabins + (r.summary.hospital ? 1 : 0) >= 3;
+  $c("#cpOut").innerHTML = inShort(r.in_short) + `
     <img class="prev" src="${r.preview}" alt="">
-    <table><tr><th>Label</th><th>No.</th><th>Kind</th><th>Berths</th><th></th></tr>
-      ${rooms.map(i => `<tr><td>${esc(i.label)}</td><td>${esc(i.room_number || "")}</td><td>${esc(i.kind)}</td>
+    ${r.items.length ? `<details style="margin-top:8px"><summary>Show all readings (${r.n_confirmed} confirmed of ${r.n_readings})</summary>
+      <table><tr><th>Name on the drawing</th><th>Room no.</th><th>Type</th><th>Berths</th><th></th></tr>
+      ${r.items.map(i => `<tr><td>${esc(i.label)}</td><td>${esc(i.room_number || "")}</td><td>${esc({stateroom: "cabin", hospital: "hospital",
+          stairway: "stairway", lab: "laboratory", mess: "mess", corridor: "corridor", toilet_shower: "toilet / shower"}[i.kind] || "other space")}</td>
         <td>${i.berths ?? ""}${i.berths && !i.berths_confirmed ? " ?" : ""}</td>
-        <td class="${i.confirmed ? "ok" : "no"}">${i.confirmed ? "✓" : "Gemini only"}</td></tr>`).join("")}</table>
-    <h2 style="margin-top:14px">Check it in RuleTrace</h2>
-    <div class="small muted">The confirmed cabins and hospital become a RuleTrace design: the rule engine checks them (MLC, consistency) and shows them in 3D. Berths count only where the drawing states them; "?" = Gemini's count, not used.</div>
-    <div class="ship"><input id="cpShipName" placeholder="Ship name"><select id="cpShipType">
+        <td class="${i.confirmed ? "ok" : "no"}">${i.confirmed ? "✓ on drawing" : "not confirmed"}</td></tr>`).join("")}</table>
+      <div class="small muted">"?" = berths counted by Gemini but not printed on the drawing: not used.</div></details>` : ""}
+    <div ${enough ? "" : "hidden"}>
+    <h2 style="margin-top:14px">Check it in RuleTrace 3D</h2>
+    <div class="small muted">Fill in what you know about the ship; the keel date and persons on board decide which rules apply.</div>
+    <div class="ship"><input id="cpShipName" placeholder="Ship name"><select id="cpShipType" title="Type of ship">
       ${["research", "passenger", "cargo", "special_purpose", "ro_ro_passenger"].map(t => `<option>${t}</option>`).join("")}</select>
-      <input id="cpLen" type="number" placeholder="Length m (for positions)"><input id="cpPers" type="number" placeholder="Persons on board">
+      <input id="cpLen" type="number" placeholder="Ship length in m"><input id="cpPers" type="number" placeholder="Persons on board">
       <label class="small">Keel laid <input id="cpKeel" type="date"></label>
-      <label class="small"><input id="cpFull" type="checkbox"> this sheet shows the complete accommodation</label></div>
-    <button class="primary" id="cpTo3d" style="width:100%;margin-top:8px">Check in RuleTrace 3D</button>
-    <div class="how">Page ${r.page} of ${r.pages}. Gemini only proposes; a room is used only when its label or number is found on the drawing at the position Gemini gives.</div>`;
+      <label class="small"><input id="cpFull" type="checkbox"> this sheet shows all cabins of the ship</label></div>
+    <button class="primary" id="cpTo3d" style="width:100%;margin-top:8px">Check in RuleTrace 3D</button></div>
+    <div class="how">Page ${r.page} of ${r.pages}. Gemini only proposes; a room is used only when its name or number is found on the drawing at the place Gemini points to.</div>`;
+  if (!enough) return;
   $c("#cpTo3d").onclick = async () => {
     const ship = {name: $c("#cpShipName").value || undefined, ship_type: $c("#cpShipType").value};
     if ($c("#cpLen").value) ship.length_m = +$c("#cpLen").value;
@@ -259,7 +271,8 @@ $c("#cpExample").onclick = async () => {
   runCheck(new File([await r.text()], "accessible_stateroom_example.csv", {type: "text/csv"}));
 };
 function showCheck(r) {
-  $c("#cpCheckOut").innerHTML = `<div class="sum" style="grid-template-columns:repeat(4,1fr)"><div><b style="color:var(--fail)">${r.counts.FAIL}</b>fail</div>
+  if (r.kind === "error") { $c("#cpCheckOut").innerHTML = inShort(r.in_short); return; }
+  $c("#cpCheckOut").innerHTML = inShort(r.in_short) + `<div class="sum" style="grid-template-columns:repeat(4,1fr)"><div><b style="color:var(--fail)">${r.counts.FAIL}</b>fail</div>
       <div><b style="color:var(--warn)">${r.counts["NEEDS REVIEW"]}</b>review</div><div><b style="color:var(--pass)">${r.counts.PASS}</b>pass</div>
       <div><b style="color:var(--unknown)">${(r.counts["NO RULE"] || 0) + (r.counts["CHECK INPUT"] || 0)}</b>no rule / input</div></div>
     ${r.counts["NO RULE"] ? `<div class="small muted" style="margin-top:6px"><b>NO RULE</b>: none of the loaded rule texts (${esc(Array.isArray(r.docs) ? r.docs.join(", ") : r.docs)}) limits these values; add the rule (e.g. class rules, SOLAS) to check them. Not the same as NEEDS REVIEW, where a rule applies but a condition must be confirmed.</div>` : ""}

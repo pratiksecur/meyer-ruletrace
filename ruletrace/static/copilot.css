@@ -40,3 +40,7 @@ header .cpbtn:hover{background:#2a82c2}
 .cp [hidden]{display:none!important}
 .cp .txt blockquote{margin:4px 0;border-left:3px solid var(--line);padding:2px 8px;color:#384552}
 .cp select,.cp input{max-width:100%;min-width:0}.cp .body{overflow-x:hidden}
+.cp .short{border:1px solid #b8d4ee;background:#f3f8fc;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:13px}
+.cp .short .lab{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#0b4f7c;margin-bottom:3px}
+.cp .short ul{margin:4px 0 0;padding-left:18px}.cp .short li{margin:2px 0}
+.cp details summary{font-size:12.5px}
