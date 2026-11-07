@@ -157,6 +157,19 @@ def _is_exempt(sentence_wo_cites: str) -> bool:
 
 
 _UNICODE_SPACES = re.compile(r"[\u00a0\u2007\u2009\u200a\u202f]")
+_UNICODE_HYPHENS = re.compile(r"[\u2010\u2011\u2012\u2212]")  # "II‑2/9.3.3" (non-breaking hyphen) is "II-2/9.3.3"
+
+
+def table_header_units(text: str) -> set[str]:
+    """Units named in a table's header row ("Minimum clear width (mm)"): the cells below carry no unit."""
+    out = set()
+    for line in text.splitlines():
+        if line.startswith("|"):
+            for alias, canon in _ALIAS_TO_UNIT.items():
+                if len(alias) > 1 and re.search(rf"(?<![A-Za-z]){re.escape(alias)}(?![A-Za-z])", line):
+                    out.add(canon)
+            break  # header row only
+    return out
 
 # a cited clause must contain at least this share of its sentence's content words (clause text + title + path,
 # limit wording like "maximum" ignored). On the eval answers correct citations scored >= 0.58 and wrong ones
@@ -199,6 +212,7 @@ def check_answer(
     from .retrieval import tokenize
 
     answer = _UNICODE_SPACES.sub(" ", answer)  # hosted models write "10\u202fmm"; check and show plain spaces
+    answer = _UNICODE_HYPHENS.sub("-", answer)
     extra_words = set(tokenize(extra_text))
     extra = [(float(v), _ALIAS_TO_UNIT.get(u or "") or _ALIAS_TO_UNIT.get((u or "").lower())) for v, u in (extra_numbers or [])]
     violations: list[Violation] = []
@@ -265,6 +279,9 @@ def check_answer(
             src_nums = extract_numbers(source) + extra
             src_values = {v for v, _ in src_nums}
             src_pairs = {(v, u) for v, u in src_nums if u}
+            for c in sent_clauses:  # table cells: the unit is in the header row
+                units = table_header_units(c.text)
+                src_pairs |= {(v, u) for v, cu in extract_numbers(c.text) if cu is None for u in units}
             for value, unit in extract_numbers(_LIST_MARKER_RE.sub("", plain)):
                 num_s = f"{value:g}{' ' + unit if unit else ''}"
                 if value not in src_values:

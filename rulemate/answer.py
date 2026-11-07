@@ -98,8 +98,24 @@ def format_context(hits: list[Hit]) -> str:
         if h.source == "xref" and h.via:
             meta.append(f"referenced by {h.via}")
         visible = [r for r in c.refs if r in shown]  # only point at clauses the model can see and cite
+        human = readable_id(c)
+        if human:
+            meta.insert(0, f"= {human}")
         blocks.append(f"{c.citation} {' | '.join(meta)}\n{expand_refs(c.text, visible)}")
     return "\n\n".join(blocks)
+
+
+def readable_id(c: Clause) -> str:
+    """How people write an MLC reference: A3.1/6(a) = "Standard A3.1, paragraph 6(a)"."""
+    if not c.doc.upper().startswith("MLC"):
+        return ""
+    m = re.match(r"^(?:(?P<k>[AB])(?P<n>\d[\d.]*)|R(?P<r>\d[\d.]*)|Art\.(?P<a>[IVX]+))(?:/(?P<p>\d+)(?P<l>\([a-z]\))?)?$",
+                 c.clause_id)
+    if not m:
+        return ""
+    head = (f"{'Standard' if m.group('k') == 'A' else 'Guideline'} {m.group('k')}{m.group('n')}" if m.group("k")
+            else f"Regulation {m.group('r')}" if m.group("r") else f"Article {m.group('a')}")
+    return head + (f", paragraph {m.group('p')}{m.group('l') or ''}" if m.group("p") else "")
 
 
 def expand_refs(text: str, refs: list[str]) -> str:
@@ -205,8 +221,38 @@ between board cabin cabins could design designs does doing during each either ev
 maximum minimum more most much must need needed needs other over required requirement requirements rule rules
 shall should ship ships since some such than that their them then there these they this those through under until
 upon what when where which while with within without would your vessel vessels people person persons large
-larger small smaller clause clauses explain allowed number amount total kind kinds type types thing things""".split())
+larger small smaller clause clauses explain allowed number amount total kind kinds type types thing things
+narrower wider longer shorter higher lower bigger greater fewer steeper deeper thicker thinner heavier lighter
+faster slower closer further farther""".split())
 _VOCAB: dict[int, set[str]] = {}
+
+
+RARE_IN_RULES = 3  # a subject word in at most this many clauses of all the loaded rules
+_DF: dict[int, dict[str, int]] = {}
+
+
+def _doc_freq(retriever) -> dict[str, int]:
+    clauses = getattr(retriever, "clauses", None) or []
+    key = id(clauses)
+    if key not in _DF:
+        _DF.clear()
+        df: dict[str, int] = {}
+        for c in clauses:
+            for st in {w[:6] for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}:
+                df[st] = df.get(st, 0) + 1
+        _DF[key] = df
+    return _DF[key]
+
+
+def terms_not_in(question: str, clauses: list, retriever=None) -> list[str]:
+    """Specific subject words of the question ("helicopter") that none of these clauses mention and that are rare
+    in all the loaded rules; common words ("space", "limits", "seafarer") never count."""
+    words = {w for c in clauses for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}
+    missing = _unknown(question, words | {w[:6] for w in words})
+    if retriever is None:
+        return missing
+    df = _doc_freq(retriever)
+    return [w for w in missing if df.get(w[:6], 0) <= RARE_IN_RULES]
 
 
 def unknown_terms(question: str, retriever) -> list[str]:
@@ -220,7 +266,10 @@ def unknown_terms(question: str, retriever) -> list[str]:
         _VOCAB.clear()
         words = {w for c in clauses for w in re.findall(r"[a-z]{3,}", (c.title + " " + c.text).lower())}
         _VOCAB[key] = words | {w[:6] for w in words}
-    stems = _VOCAB[key]
+    return _unknown(question, _VOCAB[key])
+
+
+def _unknown(question: str, stems: set[str]) -> list[str]:
     words = [w for w in re.findall(r"[a-z]{5,}", question.lower()) if w not in _STOP]
     # same first six letters = same word family (narrower ~ narrow, permissible ~ permitted is NOT matched, so
     # only words with no relative at all in the rules count)
@@ -344,11 +393,15 @@ def answer_question(
                                         attempts=attempt - 1, rejected_attempts=rejected,
                                         violations=last_violations))
         model = llm.label
-        if is_not_found(raw) and (any(h.source == "id" for h in res.hits)
-                                  or (res.confidence == "high" and not unknown_terms(question, retriever))):
+        named = any(h.source == "id" for h in res.hits)
+        if is_not_found(raw) and (named or (res.confidence == "high"
+                                            and not terms_not_in(question, [h.clause for h in hits[:5]], retriever))):
             # retrieval is confident (or the question names an existing clause): a refusal from the model is not
             # enough to tell the user "not found in the rules"; show the relevant clauses instead
-            note = ("the model gave no answer; showing the requested clause" if any(h.source == "id" for h in res.hits)
+            # the question names a clause, or the best clauses talk about every subject word of the question: the
+            # model's refusal alone is not enough to say "not found in the rules"; show the clauses instead.
+            # When a subject word ("helicopter") is in none of them, the "not found" stands.
+            note = ("the model gave no answer; showing the requested clause" if named
                     else "the model gave no answer; showing the most relevant clauses")
             return done(excerpts_answer(question, res, hits, note, attempts=attempt, rejected_attempts=rejected,
                                         model=model))
