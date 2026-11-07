@@ -20,6 +20,8 @@ text, what was required, what the design has, and how to fix it.
 Also built in:
 - **Applicability:** the ship profile (type, passengers, length, gross tonnage, keel-laying date, flag, operating areas) decides which rules apply, and the report lists the rules that *don't* apply and why. The rules are only for **new ships**, by keel-laying date.
 - **Geographic rules:** tick where the ship will operate (US ports, North American / Baltic / North Sea / Canadian Arctic emission control areas…) and re-check. PVAG/ADA and MARPOL Tier III switch on or off.
+- **Human approval:** every finding needs an engineer's decision and every check a second person's sign-off (see below).
+- **Conflicts between regulations:** when two rules set limits no single value can meet, RuleTrace says so and leaves the decision to people.
 - **Knock-on effects:** fixing one finding can break another rule. The sample `demo_cruise_masthead_cascade` raises the forward masthead light to fix COLREG 2(a)(i), and the 4.5 m separation rule 2(a)(ii) then fails. RuleTrace flags it straight away.
 
 ## Architecture
@@ -40,7 +42,13 @@ Also built in:
 - `ruletrace/ifc_import.py`: IFC reader (ifcopenshell): class mapping, property sets, world-space bounding boxes
 - `ruletrace/dashboard.py` + `static/dashboard.html`: engineer and executive dashboard, built from the recorded design checks
 - `ruletrace/rulesets.py` + `rulesets_api.py` + `static/rulesets.html`: read a regulation document into draft rules and analyse them against the designs and the current rules
-- `ruletrace/engine.py`: applicability, safe expressions, checks, findings
+- `ruletrace/engine.py`: applicability, safe expressions, checks, findings, conflicts between regulations
+- `ruletrace/reviews.py`: engineer decisions on findings, four-eyes sign-off
+- `ruletrace/revisions.py`: change measurements and re-check, compare two revisions
+- `ruletrace/posture.py`, `ruletrace/admin.py`: compliance (CISO) posture view and the Administration tab
+- `ruletrace/llm_assist.py`, `llm_actions.py`, `llm_api.py`: optional local AI helpers (Ollama); they never decide compliance
+- `ruletrace/static/parts.js`, `report.js`: detailed 3D parts, printable compliance report
+- `ruletrace/access.yaml`: who sees what (engineer, compliance, executive, administrator)
 - `ruletrace/rules/*.yaml`: the rule pack (35 rules: Tonnage Convention gross tonnage from the enclosed volume, SOLAS/FSS fire and escape, SOLAS II-1 collision bulkhead and double bottom, Load Line deck openings and guard rails, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
@@ -65,13 +73,21 @@ python -m uvicorn ruletrace.app:app --port 8001
 Open **http://localhost:8001/ruletrace**, then *Load a sample → Demo cruise ship: Deck 7*.
 
 Then open **http://localhost:8001/ruletrace/dashboard** (or click *Dashboard*). It is built from the
-design checks you just ran, read back from the audit chain:
-- **Engineer view** (e.g. Mikko, role `engineer`): every design with its status and failing rules, open
-  non-compliances by regulation, a link back to each design in 3D, and the audit trail of checks
-  (verify the record, download it as JSON for class).
-- **Executive view** (e.g. Sanna, role `ceo`): designs ready vs needing changes, where the issues are, and an
-  estimate of rework cost avoided and engineer time saved. The money figures use placeholder
+design checks you just ran, read back from the audit chain. Switch person with *Signed in as* (demo users:
+Mikko, design engineer; Aino, compliance lead and approver; Ella, admin). Who sees what is set in `ruletrace/access.yaml`
+and enforced by the API:
+- **Engineer view** (roles `engineer`, `naval_architect`, `design_engineer`, `admin`): every design with its status and
+  failing rules, open non-compliances by regulation (with simple bar and pie charts), each design's review state, a
+  link back to each design in 3D, and the audit trail of checks (verify the record, download it as JSON for class).
+- **Compliance view** (roles `ciso`, `compliance_lead`, `class_manager`, `grc_manager`, `auditor`): read-only
+  organisation posture (AT RISK / WATCH / CLEAR, with the rating rule shown), rule coverage, AI use, human-approval
+  progress and the audit record. These roles can view designs and approve sign-offs but cannot upload or change designs.
+- **Executive view** (roles `ceo`, `management`, `executive`, `board`): designs ready vs needing changes, where the
+  issues are, and an estimate of rework cost avoided and engineer time saved. The money figures use placeholder
   assumptions in `ruletrace/value.yaml`, shown and editable on screen; replace them with the yard's own numbers.
+- **Administration tab** (role `admin`): roles and what each can do, recent activity, system health (rules
+  verified, audit chain intact, AI helper status).
+- *Remove* on a design hides it from the designs list and the dashboard (the audit record keeps it).
 The database (`vartija.db`) and uploads (`data/`) are created in the folder you start the server from.
 
 **Working on Vartija at the same time?** Clone it next to this repo and override the pinned copy:
@@ -110,7 +126,8 @@ Upload the PDF in the viewer. The reader reports how it read the drawing ("How t
   6 SINGLE AND 10 DOUBLE CABINS"), so the plan is checked against what the drawing itself claims.
 - The keel-laying date and gross tonnage are usually not on a GA. Set the keel date in the viewer to apply
   date-based rules. With unknown gross tonnage, the strictest MLC size band is used, so a pass holds for any size.
-- Scanned (image-only) PDFs have no text layer and are rejected with a clear message (OCR them first).
+- Scanned (image-only) PDFs have no text layer; they are read with OCR when Tesseract is installed (see *Real
+  drawings*), otherwise rejected with a clear message.
 - "Does it exist on board?" checks (e.g. the hospital) only run on complete arrangements, never on partial models.
 
 Tested on the public DANA V general arrangement linked in Meyer Turku's brief (28 cabins, sickbay and
@@ -152,6 +169,16 @@ Operating areas: `us_ports`, `north_american_eca`, `us_caribbean_eca`, `baltic_s
 - Every decision is written to the audit chain (`finding.reviewed`, `check.prepared`, `check.approved`,
   `rule.reviewed`, `ruleset.activated`) with the design's fingerprint.
 
+## AI helpers (optional, local)
+
+With [Ollama](https://ollama.com) running on the same machine (`ollama pull mistral`), the viewer offers:
+*Explain in plain words* on each finding, *suggest fixes* (each suggestion is re-checked by the rule engine before it is
+shown), *what-if* questions in plain language (turned into checked value changes), questions about the rule pack, and
+drafting rules from regulation text (always `verified: false`). The model never decides compliance: every number and
+pass/fail comes from the rule engine, citations are checked against what was given to the model, and each use is
+written to the audit chain. Without Ollama, everything else works. Settings: `RULETRACE_LLM_BASE_URL`
+(default `http://localhost:11434`), `RULETRACE_LLM_MODEL` (default `mistral`), `RULETRACE_LLM_TIMEOUT`, `RULETRACE_LLM_NUM_CTX`.
+
 ## When two regulations conflict
 
 Some parts are covered by two rules that set opposite limits on the same physical value. RuleTrace finds these
@@ -166,7 +193,14 @@ an equivalent arrangement accepted by the flag or class under SOLAS reg. I/5 / L
 decision goes through the normal engineer review and second-person sign-off, into the audit record and the report.
 New rule sets are checked for the same kind of conflict before they are used.
 
-## Comparing revisions and the compliance report
+## Changing a design and comparing revisions
+
+- **Change measurements** (in the details of any part): type new values (e.g. a cabin's area or a door's width), or
+  edit the **ship particulars** (length, breadth, persons, gross tonnage, keel date, operating areas). Changes are
+  shown as pending; *Re-check* saves them as a new revision and checks it, so you can see straight away which rules
+  now fail. Example on a GA: a single cabin of 15 m² changed to 6 m² fails MLC 2006 (at least 7 m²).
+- **3D detail:** each part type is drawn as a recognisable object (doors with frames and sills, stairs with treads,
+  rails with courses, cabins, lights on masts); failing parts are red with a label, and a parts list shows every part.
 
 - **Compare two revisions** (left panel, *Compare two revisions*): pick the older and the newer design, or *Try it:
   the cruise ship before and after fixes*. RuleTrace checks both with the same rules and lists what was **fixed**,
@@ -225,9 +259,11 @@ Add an entry to a file in `ruletrace/rules/`, then add a labelled sample case an
   fix: Widen the stairway to at least 900 mm clear width between handrails.
 ```
 Check types: `requirement` (number with units), `requirement_expr` (formula, e.g. COLREG masthead height
-from the ship's breadth), `actual_expr` (a value computed from the geometry), `fire_class_at_least`, `slope_max`, `equals`.
-Applicability keys: `ship_types`, `passenger_ship`, `passengers_more_than`, `keel_laid_on_or_after`,
-`length_m_at_least`, `gross_tonnage_at_least`, `operating_areas_any`.
+from the ship's breadth), `actual_expr` (a value computed from the geometry), `fire_class_at_least`, `slope_max`,
+`equals`, `equals_expr`.
+Applicability keys: `ship_types`, `passenger_ship`, `passengers_more_than`, `persons_at_least`, `keel_laid_on_or_after`,
+`length_m_at_least`, `gross_tonnage_at_least`, `enclosed_volume_given`, `complete_arrangement`, `operating_areas_any`.
+`target.type` can be one part type or a list (e.g. `[door, weather_door]`).
 
 ## Accuracy
 
@@ -236,8 +272,9 @@ python scripts/evaluate.py
 ```
 It reports precision and recall over the labelled designs in `ruletrace/samples/`. **Be honest about it:** the
 samples are synthetic and were labelled by the same team that wrote the rules, so 100% shows the
-engine does what the rules say. It is not proof that the rules are complete. Rules marked `verified: false`
-(the escape door/corridor widths) need checking against the current FSS Code text before use.
+engine does what the rules say. It is not proof that the rules are complete. All 35 rules are marked
+`verified: true`: each value was checked against a published source, linked in its `source_url` (consolidated
+ICLL text, FSS Code res. MSC.98(73), 2010 ADA Standards, and others). New rules start as `verified: false`.
 
 ### Real drawings
 
@@ -270,6 +307,8 @@ to PATH. Linux: `apt install tesseract-ocr`. Without it, such drawings are rejec
 - Hull and deck rules (collision bulkhead, double bottom, Load Line openings and rails) are the SOLAS / ICLL requirements that class rules repeat. The collision-bulkhead check does not yet model the bulbous-bow reference point (SOLAS II-1/12.2). We could not get DNV's own rule text at the event, so no rule cites a DNV paragraph; add one once access is available.
 - The rule pack is a focused starter set, not full coverage. Each rule is small to add and test.
 - GA reading uses text labels and their positions. Room outlines (the drawn lines) are not traced yet, so footprints are approximate, and dimension lines are not yet used. Drawings without a text layer are read with OCR (Tesseract), which is slower and reads dimensions and labels, not room outlines.
+- Conflicts between regulations are found for fixed limits on the same property of the same part (e.g. sill /
+  threshold height); limits from formulas are not compared yet.
 - PVAG were published by the US Access Board as proposed guidelines. Confirm their status for each project.
 
 ## Data and IP
