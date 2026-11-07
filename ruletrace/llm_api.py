@@ -32,6 +32,8 @@ def get_client():
 
 class ExplainIn(BaseModel):
     limit: int = Field(default=8, ge=1, le=30, description="Explain at most this many failing findings")
+    rule_id: str | None = Field(default=None, description="Only explain the finding(s) of this rule")
+    element_id: str | None = Field(default=None, description="...and of this element (used with rule_id)")
 
 
 class DraftIn(BaseModel):
@@ -69,7 +71,11 @@ def add_llm_routes(app, router, engineer, path_of) -> None:
     def explain(design_id: str, body: ExplainIn | None = None, who: Principal = Depends(engineer)) -> dict:
         rec, result = _result_for(design_id)
         client = get_client()
-        items = llm_assist.explain_findings(client, result["findings"], (body.limit if body else 8))
+        findings = result["findings"]
+        if body and body.rule_id:  # one finding, e.g. the one the engineer clicked in the viewer
+            findings = [f for f in findings if f["rule_id"] == body.rule_id
+                        and (body.element_id is None or f.get("element_id") == body.element_id)]
+        items = llm_assist.explain_findings(client, findings, (body.limit if body else 8))
         _audit(who, "design.explained", {"design_id": design_id, "design_sha256": rec["sha256"],
                                          "model": client.name, "explained": len(items),
                                          "fell_back_to_rules": sum(1 for i in items if i["source"] == "rules")})

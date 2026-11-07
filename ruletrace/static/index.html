@@ -44,6 +44,12 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button
 details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
 .areas label{display:block;font-size:13px}.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
 .toast.err{background:var(--fail)}
+.ai{border:1px solid #cfe0ef;background:#f3f8fc;border-radius:8px;padding:8px 10px;margin-top:8px;font-size:12.5px}
+.ai .lab{font-size:11px;color:var(--muted);margin-bottom:4px}.ai p{margin:3px 0}
+button.aib{font-size:12px;padding:4px 9px;margin-top:8px;border-color:#9cc3e0;color:#0b4f7c;background:#f3f8fc}
+#aiState{font-size:11.5px;margin-left:6px}
+textarea{width:100%;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:7px;padding:6px}
+pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-size:11.5px;overflow:auto;max-height:260px;white-space:pre}
 .filters{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}.filters button{padding:3px 8px;font-size:12px}.filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 </style>
 </head>
@@ -72,6 +78,14 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
     <label class="small" for="keel">Keel laid</label>
     <input type="date" id="keel" style="width:100%;margin:2px 0 8px">
     <button id="recheck" style="width:100%">Re-check with these settings</button>
+    <h2 style="margin-top:22px">AI helper <span id="aiState" class="muted"></span></h2>
+    <details id="draftBox"><summary>Turn a regulation paragraph into a draft rule</summary>
+      <div class="small muted" style="margin:4px 0 6px">Paste one paragraph. The AI writes a draft check; nothing is added to the rule pack until an engineer has verified it.</div>
+      <textarea id="dText" rows="5" placeholder="e.g. Stairways shall not be less than 900 mm in clear width."></textarea>
+      <input id="dRegime" placeholder="Regulation (e.g. SOLAS)" style="width:49%;margin-top:4px"> <input id="dRef" placeholder="Paragraph (e.g. II-2/13.3)" style="width:49%">
+      <button id="dGo" class="aib" style="width:100%">Write a draft rule</button>
+      <div id="dOut" class="small"></div>
+    </details>
   </aside>
   <main id="view"><div id="hover"></div>
     <div id="start"><div class="box"><b style="font-size:18px">How RuleTrace works</b>
@@ -245,7 +259,7 @@ async function boot(){
   if (want && want !== current && designs.some(d => d.id === want)) { history.replaceState(null, "", location.pathname); await open(want); }
 }
 async function open(id, overrides){
-  current = id;
+  current = id; aiCache.clear();
   document.querySelectorAll("#designs .it").forEach(e => e.classList.toggle("sel", e.dataset.id === id));
   result = await api(`/ruletrace/designs/${id}/check`, {method:"POST", body:{ship_overrides: overrides || {}}});
   const s = result.ship;
@@ -285,6 +299,7 @@ function renderFindings(){
     ${selected===i ? detail(f) : `<div class="small" style="margin-top:3px">${esc(f.message)}</div>`}</div>`).join("")
     : `<div class="muted">Nothing in this filter.</div>`;
   document.querySelectorAll(".f").forEach(e => e.onclick = () => select(+e.dataset.i));
+  document.querySelectorAll("[data-ai]").forEach(b => b.onclick = ev => { ev.stopPropagation(); explainOne(+b.dataset.ai); });
   $("#na").innerHTML = result.rules_not_applicable.length ? result.rules_not_applicable.map(r => `<div style="margin:6px 0"><b>${esc(r.title)}</b> <span class="muted">${esc(r.regime)} ${esc(r.ref)}</span>
       <div class="muted">${r.reasons.map(esc).join("; ")}</div></div>`).join("") : "All rules in the pack apply.";
 }
@@ -296,7 +311,8 @@ function detail(f){
     ${f.fix ? `<div class="small" style="margin-top:4px"><b>Fix:</b> ${esc(f.fix)}</div>` : ""}
     ${f.quote ? `<div class="quote">"${esc(f.quote)}"</div>` : ""}
     <div class="small"><span class="badge ${f.verified?"":"unv"}">${f.verified?"value checked against published text":"value not yet verified: confirm with the official text"}</span>
-    ${f.source_url ? ` <a href="${esc(f.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</div>`;
+    ${f.source_url ? ` <a href="${esc(f.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</div>
+    ${f.status === "fail" || f.status === "warn" ? aiBlock(f) : ""}`;
 }
 function select(i){
   selected = i; renderFindings();
@@ -318,6 +334,53 @@ $("#up").onclick = guard(async () => {
 });
 $("#tryDemo").onclick = guard(async () => {
   const d = await api("/ruletrace/designs/sample/demo_cruise_deck7", {method:"POST"}); await boot(); await open(d.id); });
+// ---------- AI helper (local model via Ollama; it explains and drafts, the rule engine decides) ----------
+const aiCache = new Map();   // "rule|element" -> explanation, or "loading"
+const aiKey = f => `${f.rule_id}|${f.element_id ?? ""}`;
+function aiBlock(f){
+  const e = aiCache.get(aiKey(f)), i = result.findings.indexOf(f);
+  if (e === "loading") return `<div class="ai muted">Asking the AI helper…</div>`;
+  if (!e) return `<button class="aib" data-ai="${i}">Explain in plain words (AI)</button>`;
+  const p = e.parts || {};
+  return `<div class="ai"><div class="lab">${e.source === "rules"
+      ? "AI helper not available or its answer failed our checks, so this is the standard explanation"
+      : `Written by the AI helper (${esc(e.source)}) and checked against this finding: same values, same paragraph`}</div>
+    ${p.requirement ? `<p><b>The rule:</b> ${esc(p.requirement)}</p>` : ""}${p.design_state ? `<p><b>The design:</b> ${esc(p.design_state)}</p>` : ""}
+    ${p.why_it_matters ? `<p><b>Why it matters:</b> ${esc(p.why_it_matters)}</p>` : ""}${p.fix ? `<p><b>What to do:</b> ${esc(p.fix)}</p>` : ""}</div>`;
+}
+async function explainOne(i){
+  const f = result.findings[i], k = aiKey(f);
+  aiCache.set(k, "loading"); renderFindings();
+  try {
+    const r = await api(`/ruletrace/designs/${current}/explain`, {method:"POST", body:{limit:1, rule_id:f.rule_id, element_id:f.element_id ?? null}});
+    aiCache.set(k, r.explanations[0] || {source:"rules", parts:{requirement: f.message}});
+  } catch(e){ aiCache.delete(k); toast(e.message, true); }
+  renderFindings();
+}
+async function aiStatus(){
+  try { const s = await api("/ruletrace/llm/status");
+    $("#aiState").textContent = s.reachable && s.model_pulled ? `on (${s.model})` : "off: start Ollama to use it";
+    $("#aiState").style.color = s.reachable && s.model_pulled ? "var(--pass)" : "var(--muted)";
+  } catch(e){ $("#aiState").textContent = ""; }
+}
+$("#dGo").onclick = guard(async () => {
+  const text = $("#dText").value.trim(); if (text.length < 20) return toast("Paste a full regulation paragraph first", true);
+  $("#dGo").disabled = true; $("#dOut").innerHTML = `<div class="muted" style="margin-top:6px">Writing a draft…</div>`;
+  try {
+    const r = await api("/ruletrace/rules/draft", {method:"POST", body:{text, regime:$("#dRegime").value, ref:$("#dRef").value}});
+    const ds = r.drafts || [];
+    $("#dOut").innerHTML = (ds.length ? ds.map(d => `<div style="margin-top:8px"><b>${esc(d.rule.title || d.rule.id)}</b>
+        <span class="pill ${d.ok ? "pass" : "fail"}">${d.ok ? "usable draft" : "rejected"}</span>
+        ${d.problems.map(x => `<div style="color:var(--fail)">• ${esc(x)}</div>`).join("")}
+        ${(d.warnings||[]).map(x => `<div style="color:var(--warn)">• ${esc(x)}</div>`).join("")}</div>`).join("")
+      : `<div class="muted" style="margin-top:6px">${esc(r.unclear || "No checkable requirement found in this text.")}</div>`)
+      + (r.yaml ? `<pre class="yaml">${esc(r.yaml)}</pre><button class="aib" id="dCopy">Copy draft</button>
+        <div class="muted" style="margin-top:4px">Marked <b>verified: false</b>. Check it against the official text before adding it to the rules.</div>` : "");
+    if (r.yaml) $("#dCopy").onclick = () => navigator.clipboard?.writeText(r.yaml).then(() => toast("Draft copied"));
+  } finally { $("#dGo").disabled = false; }
+});
+$("#who").addEventListener("change", aiStatus);
+aiStatus();
 guard(boot)();
 </script>
 </body>

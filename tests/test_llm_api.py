@@ -57,3 +57,12 @@ def test_ask_cites_rules_and_respects_roles(client, monkeypatch):
     assert r["citations"] and r["citations"][0]["rule_id"] == "COLREG-ANNEX-I-2a-i-MASTHEAD-HEIGHT"
     assert client.post("/ruletrace/ask", headers=CEO, json={"question": "masthead light height"}).status_code == 403
     assert client.get("/ruletrace/llm/status", headers=ENG).json()["reachable"] is True
+
+
+def test_explain_one_finding_by_rule(client, monkeypatch):
+    did = _design(client)
+    monkeypatch.setattr(llm_api, "get_client", lambda: Fake("not json"))  # forces the deterministic fallback
+    r = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG,
+                    json={"limit": 1, "rule_id": "ADA-405.2-RAMP-SLOPE", "element_id": "R-7-1"}).json()
+    assert [(e["rule_id"], e["element_id"]) for e in r["explanations"]] == [("ADA-405.2-RAMP-SLOPE", "R-7-1")]
+    assert r["explanations"][0]["source"] == "rules" and "1:12" in r["explanations"][0]["explanation"]
