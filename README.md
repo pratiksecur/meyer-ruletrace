@@ -38,6 +38,7 @@ Also built in:
 - `ruletrace/model.py`: design model and JSON loader
 - `ruletrace/ga_import.py`: GA drawing reader (PDFium): scale from frame numbers, deck plans and heights, room labels, principal particulars, title-block statements
 - `ruletrace/ifc_import.py`: IFC reader (ifcopenshell): class mapping, property sets, world-space bounding boxes
+- `ruletrace/dashboard.py` + `static/dashboard.html`: engineer and executive dashboard, built from the recorded design checks
 - `ruletrace/engine.py`: applicability, safe expressions, checks, findings
 - `ruletrace/rules/*.yaml`: the rule pack (23 rules: SOLAS/FSS fire and escape, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
@@ -61,6 +62,15 @@ python -m uvicorn ruletrace.app:app --port 8001
 ```
 
 Open **http://localhost:8001/ruletrace**, then *Load a sample → Demo cruise ship: Deck 7*.
+
+Then open **http://localhost:8001/ruletrace/dashboard** (or click *Dashboard*). It is built from the
+design checks you just ran, read back from the audit chain:
+- **Engineer view** (e.g. Mikko, role `engineer`): every design with its status and failing rules, open
+  non-compliances by regulation, a link back to each design in 3D, and the audit trail of checks
+  (verify the record, download it as JSON for class).
+- **Executive view** (e.g. Sanna, role `ceo`): designs ready vs needing changes, where the issues are, and an
+  estimate of rework cost avoided and engineer time saved. The money figures use placeholder
+  assumptions in `ruletrace/value.yaml`, shown and editable on screen; replace them with the yard's own numbers.
 The database (`vartija.db`) and uploads (`data/`) are created in the folder you start the server from.
 
 **Working on Vartija at the same time?** Clone it next to this repo and override the pinned copy:

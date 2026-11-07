@@ -50,7 +50,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
   <span class="sp"></span>
   <label class="small" for="who">Signed in as</label>
   <select id="who"></select>
-  <a href="/dashboard">Dashboard</a>
+  <a href="/ruletrace/dashboard">Dashboard</a>
 </header>
 <div class="wrap">
   <aside>
@@ -233,6 +233,8 @@ async function boot(){
     : `<div class="muted">No designs yet. Load a sample below or upload a model.</div>`;
   document.querySelectorAll("[data-id]").forEach(e => e.onclick = guard(() => open(e.dataset.id)));
   if (!designs.length && samples.length) $("#napp").open = false;
+  const want = (location.hash.match(/design=([a-z0-9-]+)/) || [])[1];
+  if (want && want !== current && designs.some(d => d.id === want)) { history.replaceState(null, "", location.pathname); await open(want); }
 }
 async function open(id, overrides){
   current = id;

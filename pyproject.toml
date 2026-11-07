@@ -22,4 +22,4 @@ dev = ["pytest>=8", "httpx>=0.27", "reportlab>=4"]
 packages = ["ruletrace"]
 
 [tool.setuptools.package-data]
-ruletrace = ["static/*", "rules/*.yaml", "samples/*"]
+ruletrace = ["static/*", "rules/*.yaml", "samples/*", "value.yaml"]

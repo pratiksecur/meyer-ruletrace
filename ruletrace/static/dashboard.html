@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuleTrace · dashboard</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#16202a;--muted:#5d6975;--line:#dde3e8;--navy:#0b2545;--teal:#138a8a;
+--fail:#d64545;--warn:#d88b16;--unknown:#6b7c93;--pass:#2e8b57;--r:10px}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:var(--navy);color:#fff;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:600}header .sub{color:#b9c7d8;font-size:12px}header .sp{flex:1}
+header a{color:#cfe3ff;font-size:13px}header select{font:inherit;border-radius:6px;border:0;padding:4px 6px}
+main{max-width:1240px;margin:0 auto;padding:18px 16px 40px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:14px}
+.grid{display:grid;gap:14px}.g2{grid-template-columns:1.6fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:900px){.g2,.g3{grid-template-columns:1fr}}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.kpi b{display:block;font-size:24px;font-variant-numeric:tabular-nums}.kpi span{color:var(--muted);font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}tr.sub td{background:#fafbfc;padding:6px 8px 10px 22px}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.pill{font-size:11px;border-radius:999px;padding:2px 8px;color:#fff;white-space:nowrap;display:inline-block}
+.pill.fix{background:var(--fail)}.pill.info{background:var(--unknown)}.pill.review{background:var(--warn)}.pill.ready{background:var(--pass)}
+.c-fail{color:var(--fail)}.c-warn{color:var(--warn)}.c-unknown{color:var(--unknown)}.c-pass{color:var(--pass)}
+.muted{color:var(--muted)}.small{font-size:12px}.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:7px;padding:5px 10px;cursor:pointer}
+button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{font-size:13px}
+.bar{display:flex;align-items:center;gap:8px;margin:7px 0}.bar .l{width:170px;font-size:13px}.bar .t{flex:1;background:var(--bg);border-radius:5px;height:14px;overflow:hidden}
+.bar .t i{display:block;height:100%;background:var(--fail)}.bar .n{width:28px;text-align:right;font-variant-numeric:tabular-nums}
+.chain{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;margin-bottom:10px}
+.chain.ok{background:#e8f5ee;color:#1d6b43}.chain.bad{background:#fbeaea;color:#a12a2a}
+.act{display:grid;grid-template-columns:52px 1fr auto;gap:2px 10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+.hero{font-size:22px;font-weight:600;margin:4px 0 14px}.hero span{color:var(--teal)}
+.big{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;margin:4px 0}
+.ship{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.ship b{flex:1}
+.assume label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;margin:5px 0}
+.assume input{width:110px;font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;text-align:right}
+.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
+.toast.err{background:var(--fail)}
+</style>
+</head>
+<body>
+<header>
+  <h1>RuleTrace</h1><span class="sub">Dashboard: every number here comes from the design checks run in RuleTrace</span>
+  <span class="sp"></span>
+  <label class="small" for="who">Signed in as</label>
+  <select id="who"></select>
+  <a href="/ruletrace">3D design check</a>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<div id="toast" class="toast"></div>
+<script>
+const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
+                {label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+                {label:"Sanna · CEO", user:"sanna", roles:"ceo"},
+                {label:"Ella · admin", user:"ella", roles:"admin"}];
+const PLAIN = {"SOLAS":"Fire safety and escape (SOLAS)", "SOLAS / FSS Code":"Escape stairs (FSS Code)", "COLREG":"Navigation lights (COLREG)",
+  "MARPOL":"Engine emissions (MARPOL)", "MLC 2006":"Crew accommodation (MLC)", "PVAG":"Accessibility, US ports (PVAG)",
+  "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency"};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+PEOPLE.forEach((p,i) => $("#who").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p.label)}</option>`));
+$("#who").value = store.get("ruletrace.dash.who") || "0";
+$("#who").onchange = () => { store.set("ruletrace.dash.who", $("#who").value); load(); };
+function headers(){ const p = PEOPLE[+$("#who").value]; return {"X-User":p.user, "X-Roles":p.roles, "X-User-Kind":"human"}; }
+async function api(path, opts={}){
+  const r = await fetch(path, {...opts, headers: headers()});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `HTTP ${r.status}`);
+  return d;
+}
+function toast(m, err){ const t=$("#toast"); t.textContent=m; t.className="toast"+(err?" err":""); t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none", err?6000:2500); }
+const when = ts => { try { return new Date(ts).toLocaleString([], {dateStyle:"short", timeStyle:"short"}) } catch(e){ return ts } };
+const plain = r => PLAIN[r] || r;
+let S = null, V = null;
+
+async function load(){
+  try { S = await api("/ruletrace/summary"); }
+  catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+  V = {...S.value};
+  if (!S.designs.length) {
+    $("#main").innerHTML = `<div class="card empty">No design has been checked yet.<br><br>
+      <a href="/ruletrace">Open the 3D design check</a>, load a sample or upload a GA drawing / IFC model, and it will appear here.</div>`;
+    return;
+  }
+  S.view === "engineer" ? engineerView() : executiveView();
+}
+
+// ---------------- engineer view ----------------
+function engineerView(){
+  const t = S.totals, c = S.chain;
+  $("#main").innerHTML = `
+  <div class="kpis">
+    <div class="kpi"><b>${t.designs}</b><span>designs checked</span></div>
+    <div class="kpi"><b class="c-fail">${t.open_fail}</b><span>non-compliances open</span></div>
+    <div class="kpi"><b class="c-unknown">${t.open_unknown}</b><span>can't check (information missing)</span></div>
+    <div class="kpi"><b class="c-warn">${t.open_warn}</b><span>warnings to review</span></div>
+    <div class="kpi"><b>${t.checks_run}</b><span>checks run, all recorded</span></div>
+  </div>
+  <div class="card"><h2>Designs</h2>
+    <table><thead><tr><th>Design</th><th>Status</th><th class="num">Fail</th><th class="num">Warn</th><th class="num">Can't check</th><th class="num">Pass</th><th>Last check</th><th></th></tr></thead>
+    <tbody>${S.designs.map((d,i) => `
+      <tr><td><b>${esc(d.title)}</b><div class="small muted">${esc(d.ship)} · ${esc(d.format)} · ${d.elements} elements${Object.keys(d.what_if).length ? " · what-if: " + esc(Object.keys(d.what_if).join(", ")) : ""}</div></td>
+        <td><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></td>
+        <td class="num c-fail">${d.counts.fail||0}</td><td class="num c-warn">${d.counts.warn||0}</td><td class="num c-unknown">${d.counts.unknown||0}</td><td class="num c-pass">${d.counts.pass||0}</td>
+        <td class="small">${esc(d.checked_by)}, ${esc(when(d.checked_at))}<div class="muted">audit entry #${d.audit_seq}</div></td>
+        <td class="small" style="white-space:nowrap">${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}">Open in 3D</a> · <a href="#" data-rm="${esc(d.design_id)}">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
+      ${d.fails.length ? `<tr class="sub"><td colspan="8">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)} · ${esc(f.element_id || "whole ship")} · ${esc(f.severity)}</span></div>`).join("")}</td></tr>` : ""}`).join("")}
+    </tbody></table>
+    <div class="small muted" style="margin-top:8px">A design uploaded more than once (same file fingerprint) is shown once, with its latest check.</div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Open non-compliances by regulation</h2>${bars()}
+      <div class="small muted" style="margin-top:10px">Rule pack: ${S.rule_pack.count} rules from ${S.rule_pack.regimes.map(esc).join(", ")}.</div></div>
+    <div class="card"><h2>Audit trail of design checks</h2>
+      <div class="chain ${c.ok ? "ok" : "bad"}"><b>${c.ok ? "✓ Record intact" : "✗ Record has been changed"}</b>
+        <span class="small">${c.entries} entries${c.ok ? "" : " · broken at #" + c.first_broken_seq + ": " + esc(c.reason)}</span>
+        <span class="mono small">head ${esc((c.head_hash||"").slice(0,16))}…</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:8px"><button id="verify">Verify again</button><button id="dl" class="primary">Download audit record</button></div>
+      ${S.activity.map(a => `<div class="act"><span class="mono muted">#${a.seq}</span>
+        <span><b>${esc(a.actor)}</b> checked ${esc(a.file)}${Object.keys(a.what_if).length ? ` <span class="muted">(what-if)</span>` : ""}<br>
+        <span class="small muted">${esc(when(a.ts))} · <span class="mono">${esc(a.entry_hash.slice(0,12))}…</span></span></span>
+        <span class="small"><span class="c-fail">${a.counts.fail||0} fail</span> · <span class="c-pass">${a.counts.pass||0} pass</span></span></div>`).join("")}
+      <div class="small muted" style="margin-top:8px">Each entry stores the SHA-256 of the design file and of the rule pack, and is chained to the one before, so a changed or deleted entry is detected.</div>
+    </div>
+  </div>`;
+  $("#verify").onclick = async () => { try { const r = await api("/ruletrace/audit"); toast(r.chain.ok ? `Record intact: ${r.chain.entries} entries` : `Record changed at entry #${r.chain.first_broken_seq}`, !r.chain.ok); load(); } catch(e){ toast(e.message, true) } };
+  $("#dl").onclick = async () => { try {
+    const r = await api("/ruletrace/audit"), a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], {type:"application/json"}));
+    a.download = `ruletrace-audit-${new Date().toISOString().slice(0,10)}.json`; a.click(); } catch(e){ toast(e.message, true) } };
+  document.querySelectorAll("[data-rm]").forEach(e => e.onclick = async ev => { ev.preventDefault();
+    if (!confirm("Remove this design from RuleTrace? Its past checks stay in the audit record.")) return;
+    try { await api(`/ruletrace/designs/${e.dataset.rm}`, {method:"DELETE"}); toast("Design removed"); load(); } catch(err){ toast(err.message, true) } });
+}
+function bars(){
+  if (!S.regimes.length) return `<div class="muted">No open non-compliances.</div>`;
+  const max = Math.max(...S.regimes.map(g => g.fail));
+  return S.regimes.map(g => `<div class="bar"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>
+    <div class="small muted" style="margin:-3px 0 6px 178px">${g.rules.map(r => esc(r.title)).join(" · ")}</div>`).join("");
+}
+
+// ---------------- executive view ----------------
+function money(n){ return new Intl.NumberFormat(undefined, {style:"currency", currency: V.currency || "EUR", maximumFractionDigits:0}).format(n); }
+function executiveView(){
+  const t = S.totals;
+  const ready = S.designs.filter(d => d.readiness === "ready" || d.readiness === "review").length;
+  $("#main").innerHTML = `
+  <div class="hero">${t.designs} ship design${t.designs===1?"":"s"} checked. <span>${t.open_fail} compliance issue${t.open_fail===1?"":"s"}</span> found at design stage, before any steel is cut.</div>
+  <div class="grid g3">
+    <div class="card"><h2>Rework cost avoided</h2><div class="big" id="avoid"></div><div class="small muted" id="avoidTxt"></div></div>
+    <div class="card"><h2>Engineer time saved</h2><div class="big" id="hours"></div><div class="small muted" id="hoursTxt"></div></div>
+    <div class="card"><h2>Designs ready</h2><div class="big">${ready} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
+      <div class="small muted">${t.designs - ready} need${t.designs - ready === 1 ? "s" : ""} design changes or more information first.</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Ships</h2>${S.designs.map(d => `<div class="ship"><b>${esc(d.ship || d.title)}<div class="small muted" style="font-weight:400">${esc(d.title)}</div></b>
+      <span class="small">${d.counts.fail ? `${d.counts.fail} to fix` : ""}</span><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></div>`).join("")}</div>
+    <div class="card"><h2>Where the issues are</h2>${S.regimes.length ? S.regimes.map(g => `<div class="ship"><b style="font-weight:500">${esc(plain(g.regime))}</b><span class="c-fail">${g.fail}</span></div>`).join("") : `<div class="muted">No open issues.</div>`}</div>
+  </div>
+  <div class="card assume"><h2>Assumptions (estimate only: change them to see the effect)</h2>
+    <div class="grid g2"><div>
+      <label>Fix a major issue at design stage <input data-k="fix_cost_now.major" type="number" min="0"></label>
+      <label>Fix a major issue ${esc(V.late_label)} <input data-k="fix_cost_late.major" type="number" min="0"></label>
+      <label>Fix a minor issue at design stage <input data-k="fix_cost_now.minor" type="number" min="0"></label>
+      <label>Fix a minor issue ${esc(V.late_label)} <input data-k="fix_cost_late.minor" type="number" min="0"></label>
+    </div><div>
+      <label>Engineer cost per hour <input data-k="hourly_cost" type="number" min="0"></label>
+      <label>Minutes to check one rule on one part by hand <input data-k="manual_minutes_per_check" type="number" min="0"></label>
+      <div class="small muted" style="margin-top:8px">Placeholder figures for the demo, not the yard's own numbers. Defaults are in <span class="mono">ruletrace/value.yaml</span>.</div>
+    </div></div>
+  </div>`;
+  const get = k => k.split(".").reduce((o, p) => (o || {})[p], V), set = (k, v) => { const [a, b] = k.split("."); if (b) V[a] = {...(V[a] || {}), [b]: v}; else V[a] = v; };
+  document.querySelectorAll("[data-k]").forEach(i => { i.value = get(i.dataset.k); i.oninput = () => { set(i.dataset.k, +i.value || 0); figures(); }; });
+  figures();
+}
+function figures(){
+  const s = S.totals.fail_by_severity, late = V.fix_cost_late || {}, now = V.fix_cost_now || {};
+  const lateCost = s.major * (late.major||0) + s.minor * (late.minor||0), nowCost = s.major * (now.major||0) + s.minor * (now.minor||0);
+  $("#avoid").textContent = money(Math.max(lateCost - nowCost, 0));
+  $("#avoidTxt").textContent = `${s.major} major and ${s.minor} minor issues: about ${money(nowCost)} to fix now, instead of about ${money(lateCost)} if found ${V.late_label}.`;
+  const h = S.totals.findings_checked * (V.manual_minutes_per_check||0) / 60;
+  $("#hours").textContent = `${Math.round(h)} h`;
+  $("#hoursTxt").textContent = `${S.totals.findings_checked} rule checks done automatically, worth about ${money(h * (V.hourly_cost||0))} of engineering time.`;
+}
+load();
+</script>
+</body>
+</html>

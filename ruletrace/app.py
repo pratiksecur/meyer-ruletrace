@@ -1,8 +1,8 @@
-"""The RuleTrace application: Vartija core (login, roles, audit, sources, dashboard) + design checking.
+"""The RuleTrace application: design checking on Vartija core (login, roles, audit chain).
 
     uvicorn ruletrace.app:app --reload --port 8001
     # http://localhost:8001/ruletrace   (3D design check)
-    # http://localhost:8001/dashboard   (Vartija dashboard: sources, audit, executive view)
+    # http://localhost:8001/ruletrace/dashboard   (engineer and executive dashboard of the design checks)
 """
 
 from __future__ import annotations

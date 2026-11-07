@@ -7,6 +7,9 @@
     POST /ruletrace/designs/sample/{n}  load a bundled sample
     GET  /ruletrace/designs             list designs;  GET/DELETE /ruletrace/designs/{id}
     POST /ruletrace/designs/{id}/check  run the rules (optionally with ship-profile "what-if" overrides)
+    GET  /ruletrace/dashboard           dashboard page: engineer view and executive view, by role
+    GET  /ruletrace/summary             dashboard data, built from the recorded design checks
+    GET  /ruletrace/audit               every design check with its hash-chain fields (engineer view)
 
 Designs are stored as normalised JSON under VARTIJA_UPLOAD_DIR/ruletrace (git-ignored).
 Every check is written to the tamper-evident audit chain: who checked which design (by
@@ -30,6 +33,7 @@ from vartija_core import audit
 import yaml
 from vartija_core.api import Principal, current_principal
 
+from .dashboard import build_summary, checked_entries
 from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
 
@@ -87,6 +91,41 @@ def make_router(app) -> APIRouter:
     @router.get("", response_class=HTMLResponse, include_in_schema=False)
     def viewer() -> str:
         return (STATIC / "index.html").read_text(encoding="utf-8")
+
+    def any_view(who: Principal = Depends(current_principal)) -> Principal:
+        views = access.get("views") or {}
+        roles = set(views.get("engineer") or []) | set(views.get("executive") or [])
+        if roles and who.kind == "human" and not (set(who.roles) & roles):
+            raise HTTPException(403, "your role does not have access to the RuleTrace dashboard")
+        return who
+
+    @router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard_page() -> str:
+        return (STATIC / "dashboard.html").read_text(encoding="utf-8")
+
+    @router.get("/summary")
+    def summary(who: Principal = Depends(any_view)) -> dict:
+        """Dashboard data, built from the design checks recorded in the audit chain."""
+        views = access.get("views") or {}
+        eng = not views.get("engineer") or who.kind != "human" or bool(set(who.roles) & set(views["engineer"]))
+        with app.state.session_factory() as s:
+            out = build_summary(s, store, load_rules())
+        out["view"] = "engineer" if eng else "executive"
+        out["me"] = {"name": who.name, "roles": list(who.roles)}
+        if not eng:  # executives get the plain summary, not the element-level findings or hashes
+            for d in out["designs"]:
+                d.pop("fails", None)
+            out["activity"] = [{k: a[k] for k in ("ts", "actor", "file", "counts")} for a in out["activity"]]
+        return out
+
+    @router.get("/audit")
+    def audit_record(who: Principal = Depends(engineer)) -> dict:
+        """Every design check with its hash-chain fields, for an auditor or class surveyor to keep."""
+        with app.state.session_factory() as s:
+            entries = checked_entries(s)
+            return {"chain": audit.verify_chain(s).as_dict(), "entries": [
+                {"seq": e.seq, "ts": e.ts, "actor": e.actor, "actor_kind": e.actor_kind, "action": e.action,
+                 "payload": e.payload, "prev_hash": e.prev_hash, "entry_hash": e.entry_hash} for e in entries]}
 
     @router.get("/rules")
     def rules(who: Principal = Depends(engineer)) -> dict:

@@ -1,0 +1,16 @@
+# Assumptions behind the money figures on the RuleTrace executive view.
+# These are placeholders for the demo, not Meyer's numbers. They are shown on screen,
+# can be changed there for a what-if, and should be replaced with the yard's own figures
+# before anyone quotes them.
+currency: EUR
+hourly_cost: 80                # loaded cost of one design-engineer hour
+manual_minutes_per_check: 6    # time to check one rule against one part of the design by hand
+
+# Cost of fixing one non-compliance, by when it is found.
+fix_cost_now:                  # found at design stage, by RuleTrace: change the drawing / model
+  major: 2000
+  minor: 500
+fix_cost_late:                 # found after steel production or outfitting has started
+  major: 60000
+  minor: 8000
+late_label: after steel production starts
