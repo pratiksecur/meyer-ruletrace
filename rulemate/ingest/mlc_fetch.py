@@ -33,8 +33,16 @@ NEW_PARA = re.compile(r"^(\d{1,2}\.\s|\([a-z]\)\s|\([ivx]+\)\s|Purpose:|Note:)")
 
 
 def download(url: str, dest: Path) -> None:
+    import ssl
+
+    try:  # python.org builds on macOS have no system CA store: use certifi's (verification stays on)
+        import certifi
+
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ctx = ssl.create_default_context()
     req = urllib.request.Request(url, headers={"User-Agent": "RuleMate rule-text fetcher"})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
         dest.write_bytes(r.read())
 
 
