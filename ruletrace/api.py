@@ -10,6 +10,7 @@
     GET  /ruletrace/dashboard           dashboard page: engineer view and executive view, by role
     GET  /ruletrace/summary             dashboard data, built from the recorded design checks
     GET  /ruletrace/posture             organisation-wide compliance posture (CISO / compliance lead, engineers)
+    GET  /ruletrace/admin               administration: roles, activity, system health (administrators only)
     GET  /ruletrace/audit               every design check with its hash-chain fields (engineer view)
 
 Designs are stored as normalised JSON under VARTIJA_UPLOAD_DIR/ruletrace (git-ignored).
@@ -34,6 +35,7 @@ from vartija_core import audit
 import yaml
 from vartija_core.api import Principal, current_principal
 
+from .admin import build_admin
 from .dashboard import activity_entries, build_summary, checked_entries
 from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
@@ -60,6 +62,7 @@ def load_access(config_dir: Path) -> dict:
     access = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}) if p.exists() else {}
     own = yaml.safe_load(ACCESS_FILE.read_text(encoding="utf-8")) or {}
     access["views"] = {**(access.get("views") or {}), **(own.get("views") or {})}
+    access["administrators"] = own.get("administrators") or []
     return access
 
 
@@ -86,6 +89,14 @@ def make_router(app) -> APIRouter:
     def engineer(who: Principal = Depends(current_principal)) -> Principal:
         if view_of(who) != "engineer":
             raise HTTPException(403, "your role does not have access to design checking")
+        return who
+
+    def is_admin(who: Principal) -> bool:
+        return who.kind == "human" and bool(set(who.roles) & set(access.get("administrators") or []))
+
+    def administrator(who: Principal = Depends(current_principal)) -> Principal:
+        if not is_admin(who) or view_of(who) != "engineer":
+            raise HTTPException(403, "administrators only")
         return who
 
     def oversight(who: Principal = Depends(current_principal)) -> Principal:
@@ -133,6 +144,7 @@ def make_router(app) -> APIRouter:
         with app.state.session_factory() as s:
             out = build_summary(s, store, load_rules())
         out["view"] = view
+        out["admin"] = is_admin(who) and view == "engineer"
         out["me"] = {"name": who.name, "roles": list(who.roles)}
         if view != "engineer":  # compliance and executive views get the plain summary, not element-level findings or hashes
             for d in out["designs"]:
@@ -146,6 +158,23 @@ def make_router(app) -> APIRouter:
         rs = load_rules()
         with app.state.session_factory() as s:
             out = build_posture(build_summary(s, store, rs), rs, activity_entries(s))
+        out["me"] = {"name": who.name, "roles": list(who.roles)}
+        return out
+
+    @router.get("/admin")
+    def admin_overview(who: Principal = Depends(administrator)) -> dict:
+        """Roles and what they may do, who has been active, and system health. Administrators only."""
+        from . import llm_api  # imported here: llm_api imports this module's dependencies
+        rs = load_rules()
+        try:
+            client = llm_api.get_client()
+            llm = client.status() if hasattr(client, "status") else {"model": client.name, "reachable": True, "model_pulled": True}
+        except Exception as exc:  # the AI being down must never break the admin page
+            llm = {"model": None, "reachable": False, "model_pulled": False, "message": str(exc)}
+        with app.state.session_factory() as s:
+            entries, chain = activity_entries(s), audit.verify_chain(s).as_dict()
+        stored = len(list(store.glob("*.json"))) if store.exists() else 0
+        out = build_admin(entries, access.get("views") or {}, access.get("administrators") or [], rs, stored, chain, llm)
         out["me"] = {"name": who.name, "roles": list(who.roles)}
         return out
 

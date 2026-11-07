@@ -140,6 +140,8 @@ def build_posture(summary: dict, rules: list, entries: list[dict]) -> dict:
         signals.append({"level": "good", "text": f"Check history intact: all {chain.get('entries', 0)} records unchanged"})
 
     return {"rating": rating(len(designs), major, minor, counts["warn"], counts["unknown"]),
+            "outcomes": counts,
+            "readiness": {k: sum(1 for r in ship_rows if r["readiness"] == k) for k in ("ready", "review", "fix", "info")},
             "kpis": {"designs": len(designs), "checks_run": (summary.get("totals") or {}).get("checks_run", 0),
                      "major_open": major, "minor_open": minor, "warn_open": counts["warn"], "unknown_open": counts["unknown"],
                      "pass_rate": pass_rate, "coverage": coverage},

@@ -49,6 +49,15 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{
 .g4{grid-template-columns:repeat(4,1fr)}@media(max-width:900px){.g4{grid-template-columns:1fr}}
 .spark{display:flex;align-items:flex-end;gap:3px;height:70px;margin-top:6px}.spark i{flex:1;min-width:4px;background:var(--fail);border-radius:2px 2px 0 0}
 .sub2{margin:-4px 0 14px;color:var(--muted)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px}.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;padding:8px 14px;color:var(--muted);font-weight:600}
+.tabs button.on{color:var(--navy);border-bottom-color:var(--teal)}
+.chip{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:1px 9px;margin:2px 4px 2px 0;font-size:12px}
+.donut{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.donut svg{flex:none}.donut .dc{font-size:26px;font-weight:700;fill:var(--ink)}.donut .ds{font-size:9px;fill:var(--muted)}
+.lg{display:flex;align-items:center;gap:8px;font-size:13px;margin:5px 0;min-width:170px}.lg i{width:10px;height:10px;border-radius:3px;flex:none}.lg span{flex:1}.lg b{font-variant-numeric:tabular-nums}
+.ch text{font-size:11px;fill:var(--muted)}.ch .grid-l{stroke:var(--line);stroke-dasharray:3 3}.ch .val{fill:var(--ink);font-weight:600}.ch{width:100%;height:auto;display:block}
+.stk{display:grid;grid-template-columns:150px 1fr 34px;gap:8px;align-items:center;margin:9px 0}.stk .l{font-size:13px;line-height:1.2}.stk .t{display:flex;height:16px;background:var(--bg);border-radius:5px;overflow:hidden}
+.stk .t i{display:block;height:100%}.stk .n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.keys{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}.keys i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
 </style>
 </head>
 <body>
@@ -86,12 +95,18 @@ async function api(path, opts={}){
 function toast(m, err){ const t=$("#toast"); t.textContent=m; t.className="toast"+(err?" err":""); t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none", err?6000:2500); }
 const when = ts => { try { return new Date(ts).toLocaleString([], {dateStyle:"short", timeStyle:"short"}) } catch(e){ return ts } };
 const plain = r => PLAIN[r] || r;
-let S = null, V = null, P = null;
+let S = null, V = null, P = null, A = null;
+const root = () => $("#pane") || $("#main");
 
 async function load(){
   try { S = await api("/ruletrace/summary"); }
   catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
   V = {...S.value};
+  if (S.admin) {
+    try { [P, A] = await Promise.all([api("/ruletrace/posture"), api("/ruletrace/admin")]); }
+    catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+    adminShell(); return;
+  }
   if (S.view === "compliance") {
     try { P = await api("/ruletrace/posture"); }
     catch(e){ $("#main").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
@@ -108,7 +123,7 @@ async function load(){
 // ---------------- engineer view ----------------
 function engineerView(){
   const t = S.totals, c = S.chain;
-  $("#main").innerHTML = `
+  root().innerHTML = `
   <div class="hero" style="font-size:19px">${t.designs} design${t.designs===1?"":"s"} checked · <span style="color:var(--fail)">${t.open_fail} problem${t.open_fail===1?"":"s"} to fix</span></div>
   <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
     <div class="kpi"><b class="c-fail">${t.open_fail}</b><span>problems to fix (a rule is broken)</span></div>
@@ -153,9 +168,95 @@ function bars(){
   const max = Math.max(...S.regimes.map(g => g.fail));
   return S.regimes.map(g => `<div class="bar" title="${esc(g.rules.map(r => r.title).join(" · "))}"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>`).join("");
 }
+// ---------------- administrator: three tabs on top of the engineer view ----------------
+const TABS = [["org", "Organisation"], ["admin", "Administration"], ["eng", "Engineering"]];
+function adminShell(){
+  const cur = TABS.some(t => t[0] === store.get("ruletrace.dash.tab")) ? store.get("ruletrace.dash.tab") : "admin";   // administrators land on Administration
+  $("#main").innerHTML = `<div class="tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === cur ? "on" : ""}">${l}</button>`).join("")}</div><div id="pane"></div>`;
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { store.set("ruletrace.dash.tab", b.dataset.t); adminShell(); });
+  if (cur === "org") complianceView();
+  else if (cur === "admin") adminView();
+  else if (!S.designs.length) $("#pane").innerHTML = `<div class="card empty">No design has been checked yet.<br><br><a href="/ruletrace">Open the 3D design check</a> to load a sample or upload a design.</div>`;
+  else engineerView();
+}
+function adminView(){
+  const sy = A.system, llm = sy.llm || {};
+  const find = A.findings.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "✓" : x.level === "bad" ? "✗" : "!"}</i><span>${esc(x.text)}</span></div>`).join("");
+  const roles = `<table><thead><tr><th>Group</th><th>Roles in this group</th><th>What they can do</th></tr></thead><tbody>${A.roles.map(r =>
+    `<tr><td><b>${esc(r.label)}</b></td><td>${r.roles.length ? r.roles.map(x => `<span class="chip">${esc(x)}</span>`).join("") : `<span class="muted">none</span>`}</td>
+     <td class="small">${r.can.map(c => `<div>${esc(c)}</div>`).join("")}</td></tr>`).join("")}</tbody></table>
+    <div class="small muted" style="margin-top:8px">Administrators: ${A.administrators.map(x => `<span class="chip">${esc(x)}</span>`).join("")} · change roles in <span class="mono">ruletrace/access.yaml</span>, then restart the app.</div>`;
+  const byPerson = A.people.length ? stacked(A.people.map(a => ({label: a.actor, sub: "last active " + when(a.last_seen),
+      parts: [{label: "Design checks", value: a.checks, color: COL.teal}, {label: "AI helper uses", value: a.ai, color: "#7b6fd0"}]})),
+    [{label: "Design checks", color: COL.teal}, {label: "AI helper uses", color: "#7b6fd0"}]) : `<div class="muted">No activity recorded yet.</div>`;
+  const byDay = A.daily.length ? stacked(A.daily.map(d => ({label: d.day, parts: [{label: "Design checks", value: d.checks, color: COL.teal}, {label: "AI helper uses", value: d.ai, color: "#7b6fd0"}]})),
+    [{label: "Design checks", color: COL.teal}, {label: "AI helper uses", color: "#7b6fd0"}]) : `<div class="muted">No activity recorded yet.</div>`;
+  const people = A.people.length ? `<table><thead><tr><th>Person</th><th class="num">Design checks</th><th class="num">AI helper uses</th><th>Last active</th></tr></thead><tbody>${A.people.map(a =>
+    `<tr><td><b>${esc(a.actor)}</b></td><td class="num">${a.checks}</td><td class="num">${a.ai}</td><td class="small">${esc(when(a.last_seen))}</td></tr>`).join("")}</tbody></table>` : "";
+  const aiState = !llm.reachable ? ["NOT RUNNING", "c-fail", llm.message || "The local AI model cannot be reached."]
+    : !llm.model_pulled ? ["NOT INSTALLED", "c-warn", `Model ${llm.model} is missing.`] : ["READY", "c-pass", `Local model ${llm.model}. No data leaves this machine.`];
+  root().innerHTML = `
+  <div class="hero" style="margin-bottom:2px">Administration</div>
+  <div class="sub2">Who can do what, who has been active, and whether the system is healthy.</div>
+  <div class="card"><h2>What needs your attention</h2>${find}</div>
+  <div class="grid g4" style="margin-bottom:14px">
+    <div class="card" style="margin:0"><h2>AI model</h2><div class="big ${aiState[1]}" style="font-size:24px">${aiState[0]}</div><div class="small muted">${esc(aiState[2])}</div></div>
+    <div class="card" style="margin:0"><h2>Check history</h2><div class="big ${sy.history_intact === false ? "c-fail" : "c-pass"}" style="font-size:24px">${sy.history_intact === false ? "BROKEN" : "INTACT"}</div><div class="small muted">${sy.audit_records ?? 0} saved records${sy.history_intact === false ? ", changed at #" + esc(sy.first_broken_seq) : ""}</div></div>
+    <div class="card" style="margin:0"><h2>Rule pack</h2><div class="big">${sy.rules - sy.rules_unverified}<span class="muted" style="font-size:18px"> of ${sy.rules}</span></div><div class="small muted">rules verified against the official text</div></div>
+    <div class="card" style="margin:0"><h2>Designs stored</h2><div class="big">${sy.designs_stored}</div><div class="small muted">uploaded design files on this machine</div></div>
+  </div>
+  <div class="card"><h2>Roles and what they can do</h2>${roles}</div>
+  <div class="grid g2" style="align-items:start">
+    <div class="card"><h2>Activity by person</h2>${byPerson}</div>
+    <div class="card"><h2>Activity by day</h2>${byDay}</div>
+  </div>
+  ${people ? `<div class="card"><h2>People who have used RuleTrace</h2>${people}</div>` : ""}`;
+}
 // ---------------- compliance view (CISO / compliance lead): the whole organisation in one summary ----------------
 const cap = x => x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"; };
+// ---------------- charts: plain inline SVG / CSS, no library, nothing leaves the machine ----------------
+const COL = {fail:"var(--fail)", warn:"var(--warn)", unknown:"var(--unknown)", pass:"var(--pass)", teal:"var(--teal)"};
+function donut(segs, center, sub){
+  const tot = segs.reduce((a, g) => a + g.value, 0);
+  if (!tot) return `<div class="muted">No data yet.</div>`;
+  const R = 50, C = 2 * Math.PI * R; let off = 0;
+  const arcs = segs.filter(g => g.value).map(g => { const len = C * g.value / tot;
+    const el = `<circle r="${R}" cx="70" cy="70" fill="none" style="stroke:${g.color}" stroke-width="22" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"><title>${esc(g.label)}: ${g.value}</title></circle>`;
+    off += len; return el; }).join("");
+  return `<div class="donut"><svg viewBox="0 0 140 140" width="150" height="150" role="img" aria-label="${esc(sub)}: ${segs.map(g => g.label + " " + g.value).join(", ")}">${arcs}
+    <text x="70" y="70" text-anchor="middle" class="dc">${esc(center)}</text><text x="70" y="86" text-anchor="middle" class="ds">${esc(sub)}</text></svg>
+    <div>${segs.map(g => `<div class="lg"><i style="background:${g.color}"></i><span>${esc(g.label)}</span><b>${g.value}</b></div>`).join("")}</div></div>`;
+}
+function niceTop(max){ const step = Math.max(1, Math.ceil(max / 4)); return {step, top: step * 4}; }
+function vbars(items, label){
+  const W = 480, H = 210, L = 34, B = 30, T = 16, max = Math.max(...items.map(i => i.value), 0);
+  if (!max) return `<div class="muted">Nothing to show: no issues are open.</div>`;
+  const {step, top} = niceTop(max), ph = H - B - T, bw = (W - L) / items.length;
+  const grid = [0, 1, 2, 3, 4].map(i => { const y = T + ph - ph * i / 4; return `<line class="grid-l" x1="${L}" x2="${W}" y1="${y}" y2="${y}"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${i * step}</text>`; }).join("");
+  const bars = items.map((it, n) => { const h = ph * it.value / top, x = L + n * bw + bw * 0.22, w = bw * 0.56, y = T + ph - h;
+    return `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(h, it.value ? 2 : 0)}" rx="4" style="fill:${it.color}"><title>${esc(it.label)}: ${it.value}</title></rect>
+      <text class="val" x="${x + w / 2}" y="${y - 5}" text-anchor="middle">${it.value}</text><text x="${x + w / 2}" y="${H - 10}" text-anchor="middle">${esc(it.label)}</text>`; }).join("");
+  return `<svg class="ch" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}${bars}</svg>`;
+}
+function stacked(rows, keys){   // rows: {label, sub, parts:[{value,color,label}]}
+  const max = Math.max(1, ...rows.map(r => r.parts.reduce((a, p) => a + p.value, 0)));
+  return rows.map(r => { const tot = r.parts.reduce((a, p) => a + p.value, 0);
+    return `<div class="stk"><div class="l"><b style="font-weight:500">${esc(r.label)}</b>${r.sub ? `<div class="small muted">${esc(r.sub)}</div>` : ""}</div>
+      <div class="t">${r.parts.filter(p => p.value).map(p => `<i title="${esc(p.label)}: ${p.value}" style="width:${100 * p.value / max}%;background:${p.color}"></i>`).join("")}</div><div class="n">${tot}</div></div>`; }).join("")
+    + `<div class="keys">${keys.map(k => `<span><i style="background:${k.color}"></i>${esc(k.label)}</span>`).join("")}</div>`;
+}
+function lineChart(points, label){   // points: {y, tip}
+  if (!points.length) return `<div class="muted">No checks yet.</div>`;
+  const W = 900, H = 200, L = 34, R = 12, T = 14, B = 26, max = Math.max(...points.map(p => p.y), 1), {step, top} = niceTop(max), ph = H - T - B, pw = W - L - R;
+  const x = i => L + (points.length === 1 ? pw / 2 : pw * i / (points.length - 1)), y = v => T + ph - ph * v / top;
+  const grid = [0, 1, 2, 3, 4].map(i => `<line class="grid-l" x1="${L}" x2="${W - R}" y1="${y(i * step)}" y2="${y(i * step)}"/><text x="${L - 6}" y="${y(i * step) + 4}" text-anchor="end">${i * step}</text>`).join("");
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.y).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(points.length - 1).toFixed(1)} ${y(0)} L${x(0).toFixed(1)} ${y(0)} Z`;
+  const every = Math.max(1, Math.ceil(points.length / 12));
+  const dots = points.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.y)}" r="3.5" style="fill:var(--fail)"><title>${esc(p.tip)}</title></circle>${i % every === 0 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">#${i + 1}</text>` : ""}`).join("");
+  return `<svg class="ch" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}<path d="${area}" style="fill:var(--fail);opacity:.10"/><path d="${line}" fill="none" style="stroke:var(--fail)" stroke-width="2"/>${dots}</svg>`;
+}
 function complianceView(){
   const k = P.kpis, r = P.rating, ai = P.ai, rp = P.rule_pack, c = P.chain || {};
   const pct = v => v == null ? "–" : v + "%";
@@ -171,15 +272,29 @@ function complianceView(){
   const rec = P.recurring.length ? P.recurring.map(x => `<div class="ship" title="${esc(x.ref)}"><b style="font-weight:500">${esc(x.title)}<div class="small muted" style="font-weight:400">${esc(plain(x.regime))}</div></b>
       <span class="small ${x.systemic ? "c-fail" : "muted"}">${x.systemic ? "on " + x.designs + " designs" : "1 design"}</span></div>`).join("")
     : `<div class="muted">No rule is broken.</div>`;
-  const maxF = Math.max(1, ...P.trend.map(t => t.fail));
-  const trend = P.trend.length ? `<div class="spark">${P.trend.map(t => `<i title="${esc(t.file)} · ${t.fail} to fix · ${esc(when(t.ts))}" style="height:${Math.max(4, 100 * t.fail / maxF)}%"></i>`).join("")}</div>
-      <div class="small muted" style="margin-top:6px">Problems found by each check, oldest on the left (${P.trend.length} check${P.trend.length === 1 ? "" : "s"}).</div>` : `<div class="muted">No checks yet.</div>`;
+  const o = P.outcomes || {pass: 0, fail: 0, warn: 0, unknown: 0}, rd = P.readiness || {};
+  const sevChart = vbars([{label: "Major", value: k.major_open, color: COL.fail}, {label: "Minor", value: k.minor_open, color: COL.warn},
+    {label: "To review", value: k.warn_open, color: "#e6b84d"}, {label: "Can't decide", value: k.unknown_open, color: COL.unknown}], "Open issues by severity");
+  const outcomeChart = donut([{label: "Pass", value: o.pass, color: COL.pass}, {label: "Fail", value: o.fail, color: COL.fail},
+    {label: "To review", value: o.warn, color: "#e6b84d"}, {label: "Can't decide", value: o.unknown, color: COL.unknown}],
+    pct(k.pass_rate), "pass rate");
+  const readyChart = donut([{label: "Ready", value: rd.ready || 0, color: COL.pass}, {label: "Needs review", value: rd.review || 0, color: COL.warn},
+    {label: "Needs design changes", value: rd.fix || 0, color: COL.fail}, {label: "Missing information", value: rd.info || 0, color: COL.unknown}],
+    String(k.designs), k.designs === 1 ? "design" : "designs");
+  const perDesign = P.ships.length ? stacked([...P.ships].sort((a, b) => (b.major - a.major) || (b.minor - a.minor)).map(d => ({label: d.ship, sub: d.title,
+      parts: [{label: "Major", value: d.major, color: COL.fail}, {label: "Minor", value: d.minor, color: COL.warn}, {label: "Can't decide", value: d.unknown, color: COL.unknown}]})),
+    [{label: "Major", color: COL.fail}, {label: "Minor", color: COL.warn}, {label: "Can't decide", color: COL.unknown}]) : `<div class="muted">No designs yet.</div>`;
+  const regimeMax = Math.max(1, ...P.regimes.map(g => g.open_fail));
+  const byRegime = P.regimes.some(g => g.open_fail) ? P.regimes.filter(g => g.open_fail).map(g => `<div class="bar" title="${g.designs_affected} design(s) affected"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100 * g.open_fail / regimeMax}%"></i></span><span class="n">${g.open_fail}</span></div>`).join("") : `<div class="muted">No open issues in any regulation.</div>`;
+  const verifiedBars = P.regimes.map(g => `<div class="bar" title="${g.verified} of ${g.rules} rules verified"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100 * g.verified / g.rules}%;background:${g.verified < g.rules ? "var(--warn)" : "var(--pass)"}"></i></span><span class="n">${g.verified}/${g.rules}</span></div>`).join("");
+  const trendChart = lineChart(P.trend.map(t => ({y: t.fail, tip: `${t.file || "check"} · ${t.fail} to fix · ${when(t.ts)}`})), "Problems found by each check, oldest first");
+  const aiChart = ai.by_action.some(a => a.count) ? vbars(ai.by_action.filter(a => a.count).map(a => ({label: a.label.split(" ")[0], value: a.count, color: COL.teal})), "AI helper use") : "";
   const regimes = `<table><thead><tr><th>Rules from</th><th class="num">Rules</th><th class="num">Verified</th><th class="num">Open issues</th><th class="num">Designs affected</th></tr></thead><tbody>${
     P.regimes.map(g => `<tr><td>${esc(plain(g.regime))}</td><td class="num">${g.rules}</td><td class="num ${g.verified < g.rules ? "c-warn" : ""}">${g.verified}</td>
       <td class="num ${g.open_fail ? "c-fail" : "muted"}"><b>${g.open_fail}</b></td><td class="num">${g.designs_affected}</td></tr>`).join("")}</tbody></table>`;
   const aiRows = ai.by_action.filter(a => a.count).map(a => `<div class="ship"><b style="font-weight:500">${esc(a.label)}</b><span>${a.count}</span></div>`).join("")
     || `<div class="muted">The AI helpers have not been used yet.</div>`;
-  $("#main").innerHTML = `
+  root().innerHTML = `
   <div class="hero" style="margin-bottom:2px">Good ${greeting()}, ${esc(cap(P.me.name))} 👋</div>
   <div class="sub2">Compliance posture across every ship design checked in RuleTrace.</div>
   <div class="kpis">
@@ -199,16 +314,27 @@ function complianceView(){
     <div class="card" style="margin:0"><h2>History integrity</h2><div class="big ${c.ok === false ? "c-fail" : "c-pass"}">${c.ok === false ? "BROKEN" : "INTACT"}</div>
       <div class="small muted">${c.ok === false ? "The check history has been changed (record #" + esc(c.first_broken_seq) + ")." : "all " + esc(c.entries ?? 0) + " saved records are unchanged."}</div></div>
   </div>
+  <div class="grid g2" style="align-items:start">
+    <div class="card"><h2>Open issues by severity</h2>${sevChart}</div>
+    <div class="card"><h2>Result of every check</h2>${outcomeChart}</div>
+  </div>
   <div class="card"><h2>What needs your attention</h2>${sig}</div>
   <div class="card"><h2>All designs checked</h2>${ships}</div>
   <div class="grid g3" style="align-items:start">
     <div class="card"><h2>Where to focus first</h2>${focus}</div>
     <div class="card"><h2>Issues that recur across designs</h2>${rec}</div>
-    <div class="card"><h2>Trend</h2>${trend}</div>
+    <div class="card"><h2>Design readiness</h2>${readyChart}</div>
   </div>
   <div class="grid g2" style="align-items:start">
+    <div class="card"><h2>Open issues per design</h2>${perDesign}</div>
+    <div class="card"><h2>Open issues by regulation</h2>${byRegime}
+      <h2 style="margin-top:18px">Rules verified against the official text</h2>${verifiedBars}</div>
+  </div>
+  <div class="card"><h2>Problems found by each check over time</h2>${trendChart}
+    <div class="small muted" style="margin-top:6px">Oldest check on the left. A falling line means designs are being fixed (${P.trend.length} check${P.trend.length === 1 ? "" : "s"} recorded).</div></div>
+  <div class="grid g2" style="align-items:start">
     <div class="card"><h2>Rule coverage by regulation</h2>${regimes}</div>
-    <div class="card"><h2>How AI was used</h2>${aiRows}
+    <div class="card"><h2>How AI was used</h2>${aiChart}${aiRows}
       ${ai.explanations ? `<div class="small muted" style="margin-top:8px">${ai.explanations} explanation${ai.explanations === 1 ? "" : "s"} written, ${ai.explanations_fell_back} replaced by the rule's own text because they failed the checks.</div>` : ""}
       <div class="small muted" style="margin-top:8px">${esc(ai.policy)}</div></div>
   </div>

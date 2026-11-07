@@ -48,6 +48,8 @@ def test_posture_across_several_ships():
     assert k["designs"] == 3 and k["major_open"] == 2 and k["minor_open"] == 1 and k["unknown_open"] == 1
     assert k["pass_rate"] == round(100 * 30 / (30 + 3 + 1)) and k["coverage"] == round(100 * 34 / 35)
     assert p["rating"]["level"] == "at_risk"
+    assert p["outcomes"] == {"pass": 30, "fail": 3, "warn": 1, "unknown": 1}      # feeds the donut chart
+    assert p["readiness"] == {"ready": 1, "review": 0, "fix": 2, "info": 0}
     assert [r["ship"] for r in p["ships"]] == ["Ship 1", "Ship 2", "Ship 3"]
     assert [f["ship"] for f in p["focus"]] == ["Ship 1", "Ship 2"]                      # clear ship is not in focus
     r1 = p["recurring"][0]
@@ -116,3 +118,46 @@ def test_posture_is_closed_to_executives_and_outsiders_but_open_to_engineers(cli
     assert client.get("/ruletrace/summary", headers=CEO).json()["view"] == "executive"
     assert client.get("/ruletrace/summary", headers=ENG).json()["view"] == "engineer"
     assert client.get("/ruletrace/audit", headers=CEO).status_code == 403
+
+
+# ---- the administrator's view ----
+
+ADMIN = {"X-User": "ella", "X-Roles": "admin"}
+
+
+class _Up:
+    name = "ollama:test"
+
+    def status(self):
+        return {"model": "test", "reachable": True, "model_pulled": True, "message": "ok"}
+
+
+def test_admin_overview_pure():
+    from ruletrace.admin import build_admin
+    e = lambda seq, actor, action, ts="2026-11-07T10:00:00Z": {"seq": seq, "ts": ts, "actor": actor, "action": action, "payload": {}}
+    entries = [e(1, "mikko", "design.checked"), e(2, "mikko", "design.explained"), e(3, "ella", "design.checked", "2026-11-08T09:00:00Z")]
+    views = {"engineer": ["engineer", "admin"], "compliance": ["ciso"], "executive": ["ceo"]}
+    a = build_admin(entries, views, ["admin"], [rule("R1", "SOLAS"), rule("R2", "SOLAS", verified=False)], 3,
+                    {"ok": True, "entries": 3}, {"model": "m", "reachable": False, "model_pulled": False})
+    assert [p["actor"] for p in a["people"]] == ["mikko", "ella"] and a["people"][0]["checks"] == 1 and a["people"][0]["ai"] == 1
+    assert [d["day"] for d in a["daily"]] == ["2026-11-07", "2026-11-08"] and a["daily"][0]["ai"] == 1
+    assert a["system"]["rules_unverified"] == 1 and a["system"]["designs_stored"] == 3
+    texts = [f["text"] for f in a["findings"]]
+    assert any("not reachable" in t for t in texts) and any("1 of 2 rules" in t for t in texts)
+    assert next(r for r in a["roles"] if r["view"] == "compliance")["roles"] == ["ciso"]
+
+
+def test_only_administrators_get_the_administration_page(client, monkeypatch):
+    monkeypatch.setattr("ruletrace.llm_api.get_client", lambda: _Up())
+    client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG)
+    r = client.get("/ruletrace/admin", headers=ADMIN)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["system"]["history_intact"] is not False and body["administrators"] == ["admin"]
+    assert {x["view"] for x in body["roles"]} == {"engineer", "compliance", "executive"}
+    assert client.get("/ruletrace/summary", headers=ADMIN).json()["admin"] is True
+    assert client.get("/ruletrace/posture", headers=ADMIN).status_code == 200           # admins also see the organisation tab
+    for who in (ENG, CISO, CEO, OUTSIDER):
+        assert client.get("/ruletrace/admin", headers=who).status_code == 403
+    assert client.get("/ruletrace/summary", headers=ENG).json()["admin"] is False
+    assert client.get("/ruletrace/summary", headers=CISO).json()["admin"] is False

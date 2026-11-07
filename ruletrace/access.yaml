@@ -10,3 +10,7 @@ views:
   compliance: [ciso, compliance_lead, class_manager, grc_manager, auditor]
   # Plain summary and money figures. No element-level findings, no audit record.
   executive: [management, ceo, executive, board]
+
+# Administrators. They keep every engineer permission and also get the Administration tab (roles, activity, system health).
+# Administration is a view on top of the engineer view, so an administrator also needs a role listed under views.engineer.
+administrators: [admin]
