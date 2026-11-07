@@ -256,7 +256,7 @@ def check_rule(rule: Rule, design: Design) -> list[dict]:
         ctx = _Ctx(design, el)
         base = {"rule_id": rule.id, "title": rule.title, "regime": rule.regime, "ref": rule.ref,
                 "quote": rule.quote, "source_url": rule.source_url, "verified": rule.verified,
-                "severity": rule.severity, "why_rule": rule.why,
+                "severity": rule.severity, "why_rule": rule.why, "property": rule.check.get("property"),
                 "element_id": el.id if el else None, "element_name": el.name if el else design.ship.name,
                 "element_type": el.type if el else "ship", "deck": el.deck if el else "",
                 "zone": el.zone if el else "", "box": list(el.box) if el and el.box else None,
@@ -321,4 +321,5 @@ def check_design(design: Design, rules: list[Rule] | None = None) -> dict:
     return {"ship": design.to_dict()["ship"], "title": design.title, "counts": counts, "findings": findings,
             "rules_applied": applied, "rules_not_applicable": skipped,
             "elements": [{"id": e.id, "type": e.type, "name": e.name, "deck": e.deck, "zone": e.zone,
-                          "box": list(e.box) if e.box else None, "props": e.props} for e in design.elements]}
+                          "box": list(e.box) if e.box else None, "props": e.props, "source": e.source,
+                          **({"mesh": e.mesh} if e.mesh else {})} for e in design.elements]}

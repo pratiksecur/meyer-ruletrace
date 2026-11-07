@@ -281,6 +281,14 @@ def _limit(r: Rule) -> dict | None:
     return {"op": op, "value": q.value, "unit": q.unit, "base": q.base_value, "label": str(q)}
 
 
+def _short_ref(r: Rule) -> str:
+    """A short source label: 'FSS Code ch. 13, 2.1.1 (via SOLAS ...)' -> 'FSS Code ch. 13, 2.1.1'."""
+    ref = re.split(r"\s+\(|;", r.ref)[0].strip()
+    named = re.search(r"ICLL|FSS|ADA|MLC|COLREG|MARPOL|SOLAS|PVAG|Drawing|DNV|IMO", ref)
+    out = ref if named else f"{r.regime.split('/')[0].strip()} {ref}"
+    return out if len(out) <= 36 else out[:35].rstrip(" ,") + "…"
+
+
 def _req_text(r: Rule) -> str:
     c = r.check
     return c.get("requirement") or c.get("requirement_expr") or (f"not steeper than {c['slope_max']}" if "slope_max" in c else "") \
@@ -372,8 +380,9 @@ def analyze(drafts: list[dict], designs: list, current: list[Rule] | None = None
                          "hides": s["hides"][:10], "new_issues": s["new_issues"][:10],
                          "related": [{"id": o.id, "relation": k, "requirement": _req_text(o)} for o, k in rel],
                          "limit": _limit(r),
-                         "compare": [{"id": o.id, "relation": k, **(_limit(o) or {})} for o, k in rel if _limit(o)]
-                                    + [{"id": o.id, "relation": "conflict", "new_rule": True, **(_limit(o) or {})}
+                         "compare": [{"id": o.id, "relation": k, "rule": _short_ref(o), **(_limit(o) or {})}
+                                     for o, k in rel if _limit(o)]
+                                    + [{"id": o.id, "relation": "conflict", "new_rule": True, "rule": o.ref, **(_limit(o) or {})}
                                        for o in internal if _limit(o)]})
     for b in broken:
         verdicts.append({**b, "kind": "flaw", "verdict": f"Broken: {b['problem']}", "checked": 0})
