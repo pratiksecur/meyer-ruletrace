@@ -3,7 +3,7 @@
 **Since AI Hackathon 2026 · Meyer Turku challenge: "Automated class and regulatory compliance checking"**
 
 RuleTrace checks a ship design (an IFC 3D model or a structured design file) against a curated
-set of rules from SOLAS, the FSS Code, COLREG, MARPOL Annex VI, PVAG and ADA. It shows each
+set of rules from SOLAS, the FSS Code, the Load Line Convention, COLREG, MARPOL Annex VI, MLC, PVAG and ADA. It shows each
 problem **on the 3D model** and says **why** it is not compliant: the rule, its paragraph, the quoted
 text, what was required, what the design has, and how to fix it.
 
@@ -40,7 +40,7 @@ Also built in:
 - `ruletrace/ifc_import.py`: IFC reader (ifcopenshell): class mapping, property sets, world-space bounding boxes
 - `ruletrace/dashboard.py` + `static/dashboard.html`: engineer and executive dashboard, built from the recorded design checks
 - `ruletrace/engine.py`: applicability, safe expressions, checks, findings
-- `ruletrace/rules/*.yaml`: the rule pack (23 rules: SOLAS/FSS fire and escape, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
+- `ruletrace/rules/*.yaml`: the rule pack (33 rules: SOLAS/FSS fire and escape, SOLAS II-1 collision bulkhead and double bottom, Load Line deck openings and guard rails, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
 - Built on **Vartija core** (prior work; feature freeze at tag `pre-event-2026-11-05`, installed from release `v0.2.0`, which only adds a packaging fix): login and roles, audit hash chain, document sources. RuleTrace uses only Vartija's public API (`create_app`, `Principal`, `current_principal`, `audit.append`, `quantities.parse_quantity` / `check_requirement`, `settings.Settings`).
@@ -171,6 +171,7 @@ engine does what the rules say. It is not proof that the rules are complete. Rul
 ## Limits (say these if asked)
 
 - Rule texts are summaries and quotes from public sources. Class rules (e.g. DNV) and full IMO texts must be checked against the official editions before real use.
+- Hull and deck rules (collision bulkhead, double bottom, Load Line openings and rails) are the SOLAS / ICLL requirements that class rules repeat. The collision-bulkhead check does not yet model the bulbous-bow reference point (SOLAS II-1/12.2). We could not get DNV's own rule text at the event, so no rule cites a DNV paragraph; add one once access is available.
 - The rule pack is a focused starter set, not full coverage. Each rule is small to add and test.
 - GA reading uses text labels and their positions. Room outlines (the drawn lines) are not traced yet, so footprints are approximate, and dimension lines are not yet used. Vector PDFs only.
 - PVAG were published by the US Access Board as proposed guidelines. Confirm their status for each project.

@@ -74,3 +74,15 @@ def test_ifc_import_reads_geometry_and_psets():
 def test_partial_models_never_get_presence_findings():
     d = load_design(SAMPLES / "demo_cruise_deck7.json")
     assert not any(f["rule_id"] in {"MLC-A3.1-12-HOSPITAL", "GA-CONSISTENCY-TOTAL-BERTHS"} for f in check_design(d)["findings"])
+
+
+def test_load_line_and_subdivision_rules_on_cargo_sample():
+    from pathlib import Path
+    from ruletrace.engine import check_design
+    from ruletrace.model import load_design
+    d = load_design(Path(__file__).resolve().parent.parent / "ruletrace" / "samples" / "demo_cargo_ship.json")
+    r = check_design(d)
+    fails = {(f["rule_id"], f["element_id"]) for f in r["findings"] if f["status"] == "fail"}
+    assert fails == {(x["rule_id"], x["element_id"]) for x in d.expected}
+    db = next(f for f in r["findings"] if f["rule_id"] == "SOLAS-II-1-9.2-DOUBLE-BOTTOM-HEIGHT")
+    assert db["measured"] == "measured from the 3D geometry" and "1 m" in db["required"]
