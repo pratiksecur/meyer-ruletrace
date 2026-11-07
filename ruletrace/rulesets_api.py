@@ -28,7 +28,11 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from vartija_core import audit
 from vartija_core.api import Principal
 
+from pydantic import BaseModel, Field
+
+from . import engine
 from . import rulesets as rs
+from .reviews import is_approver
 from .model import DesignError, design_from_dict, load_design
 
 STATIC = Path(__file__).parent / "static"
@@ -55,8 +59,16 @@ def sample_designs() -> list[tuple[str, object]]:
     return out
 
 
-def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
+class RuleReviewIn(BaseModel):
+    decision: str = Field(pattern="^(approve|reject|clear)$")
+    reason: str = Field(default="", max_length=500)
+
+
+def add_ruleset_routes(app, router, engineer, design_store: Path, reader=None) -> None:
+    reader = reader or engineer  # engineers and the compliance lead may read rule sets; only approvers activate
     store = Path(app.state.settings.upload_dir) / "ruletrace" / "rulesets"
+    active = Path(app.state.settings.upload_dir) / "ruletrace" / "rules_active"
+    engine.ACTIVE_RULE_DIRS[:] = [active]       # approved and activated company rules join the rule pack
 
     def _designs() -> tuple[list, str]:
         seen, out = set(), []
@@ -91,8 +103,12 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
                 "ruleset_id": rec["id"], "file": rec["filename"], "sha256": rec["sha256"], "rules": len(rec["rules"]),
                 "counts": a["counts"], "designs": a["designs_used"]})
             s.commit()
+        reviews = rec.get("reviews", {})
+        for v in a["verdicts"]:
+            v["review"] = reviews.get(v["id"])
         return {**_summary(rec), "notes": rec.get("notes", []), "manual_items": rec["manual"],
-                "designs_source": used, **a}
+                "designs_source": used, "reviews": reviews, "activation": rec.get("activation"),
+                "can_approve": is_approver(who), **a}
 
     def _ingest(data: bytes, filename: str, name: str, use_ai: bool, who: Principal) -> dict:
         suffix = Path(filename).suffix.lower()
@@ -130,7 +146,7 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return (STATIC / "rulesets.html").read_text(encoding="utf-8")
 
     @router.get("/rulesets")
-    def list_rulesets(who: Principal = Depends(engineer)) -> dict:
+    def list_rulesets(who: Principal = Depends(reader)) -> dict:
         recs = [json.loads(p.read_text(encoding="utf-8")) for p in
                 sorted(store.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)] if store.exists() else []
         return {"rulesets": [_summary(r) for r in recs],
@@ -155,18 +171,90 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return _ingest(p.read_bytes(), p.name, p.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").split(":")[0], False, who)
 
     @router.get("/rulesets/{rid}")
-    def get_ruleset(rid: str, who: Principal = Depends(engineer)) -> dict:
+    def get_ruleset(rid: str, who: Principal = Depends(reader)) -> dict:
         return _analyse(json.loads(_path(rid).read_text(encoding="utf-8")), who)
 
     @router.get("/rulesets/{rid}/yaml", response_class=PlainTextResponse)
-    def ruleset_yaml(rid: str, who: Principal = Depends(engineer)) -> str:
+    def ruleset_yaml(rid: str, who: Principal = Depends(reader)) -> str:
         rec = json.loads(_path(rid).read_text(encoding="utf-8"))
         clean = [{k: v for k, v in r.items() if k != "extracted_by"} for r in rec["rules"]]
         return (f"# Draft rules from {rec['filename']} ({rec['name']}). DRAFT: verified: false on every rule.\n"
                 f"# Check each against the official text, fix what the analysis flagged, add a labelled test case,\n"
                 f"# then copy into ruletrace/rules/.\n") + yaml.safe_dump(clean, sort_keys=False, allow_unicode=True, width=110)
 
+    def _audit(who: Principal, action: str, payload: dict) -> None:
+        with app.state.session_factory() as s:
+            audit.append(s, action=action, actor=who.name, actor_kind=who.kind, payload=payload)
+            s.commit()
+
+    @router.post("/rulesets/{rid}/rules/{rule_id}/review")
+    def review_rule(rid: str, rule_id: str, body: RuleReviewIn, who: Principal = Depends(engineer)) -> dict:
+        """An engineer approves or rejects one draft rule after checking it against the official text."""
+        p = _path(rid)
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        if rec.get("activation"):
+            raise HTTPException(409, "this rule set is active; deactivate it before changing reviews")
+        if rule_id not in {r.get("id") for r in rec["rules"]}:
+            raise HTTPException(404, "no such draft rule")
+        if body.decision == "reject" and len(body.reason.strip()) < 10:
+            raise HTTPException(400, "say why the rule is rejected (at least 10 characters)")
+        reviews = rec.setdefault("reviews", {})
+        if body.decision == "clear":
+            reviews.pop(rule_id, None)
+        else:
+            reviews[rule_id] = {"decision": body.decision, "reason": body.reason.strip(), "by": who.name,
+                                "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        p.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+        _audit(who, "rule.reviewed", {"ruleset_id": rid, "rule_id": rule_id, "decision": body.decision, "reason": body.reason[:200]})
+        return _analyse(rec, who)
+
+    @router.post("/rulesets/{rid}/activate")
+    def activate(rid: str, who: Principal = Depends(reader)) -> dict:
+        """A second person with an approver role puts the approved rules into use (four-eyes)."""
+        p = _path(rid)
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        if not is_approver(who):
+            raise HTTPException(403, "your role can't put rules into use; ask a compliance lead")
+        approved = {k: v for k, v in (rec.get("reviews") or {}).items() if v["decision"] == "approve"}
+        if not approved:
+            raise HTTPException(409, "no rule has been approved by an engineer yet")
+        if who.name in {v["by"] for v in approved.values()}:
+            raise HTTPException(403, "four-eyes rule: you approved rules in this set, so someone else must activate it")
+        designs, _ = _designs()
+        verdicts = {v["id"]: v for v in rs.analyze(rec["rules"], designs)["verdicts"]}
+        flawed = [k for k in approved if verdicts.get(k, {}).get("kind") == "flaw"]
+        if flawed:
+            raise HTTPException(409, f"these approved rules still have flaws; fix or reject them first: {', '.join(flawed)}")
+        rules = [{**{k: v for k, v in r.items() if k != "extracted_by"}, "approved_by": approved[r["id"]]["by"],
+                  "activated_by": who.name} for r in rec["rules"] if r.get("id") in approved]
+        active.mkdir(parents=True, exist_ok=True)
+        (active / f"{rid}.yaml").write_text(f"# {rec['name']}: approved company rules, activated by {who.name}\n"
+                                           + yaml.safe_dump(rules, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        try:
+            engine.load_rules()
+        except engine.RuleError as exc:
+            (active / f"{rid}.yaml").unlink()
+            raise HTTPException(409, f"could not activate: {exc}") from exc
+        rec["activation"] = {"by": who.name, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "rules": len(rules)}
+        p.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+        _audit(who, "ruleset.activated", {"ruleset_id": rid, "rules": [r["id"] for r in rules]})
+        return _analyse(rec, who)
+
+    @router.post("/rulesets/{rid}/deactivate")
+    def deactivate(rid: str, who: Principal = Depends(reader)) -> dict:
+        p = _path(rid)
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        if not is_approver(who):
+            raise HTTPException(403, "only an approver can take rules out of use")
+        (active / f"{rid}.yaml").unlink(missing_ok=True)
+        rec["activation"] = None
+        p.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+        _audit(who, "ruleset.deactivated", {"ruleset_id": rid})
+        return _analyse(rec, who)
+
     @router.delete("/rulesets/{rid}")
     def delete_ruleset(rid: str, who: Principal = Depends(engineer)) -> dict:
+        if (active / f"{rid}.yaml").exists():
+            raise HTTPException(409, "this rule set is in use; deactivate it first")
         _path(rid).unlink()
         return {"deleted": rid}

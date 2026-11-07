@@ -37,3 +37,13 @@ def test_audit_record_and_access(client):
 def test_answer_keys_are_not_listed_as_samples(client):
     names = [s["name"] for s in client.get("/ruletrace/samples", headers=ENG).json()]
     assert "demo_ga_drawing" in names and not any(n.endswith(".expected") for n in names)
+
+
+def test_removed_designs_leave_the_totals(client):
+    a = client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
+    b = client.post("/ruletrace/designs/sample/demo_cargo_ship", headers=ENG).json()["id"]
+    for d in (a, b):
+        client.post(f"/ruletrace/designs/{d}/check", headers=ENG, json={})
+    client.delete(f"/ruletrace/designs/{a}", headers=ENG)
+    t = client.get("/ruletrace/summary", headers=ENG).json()["totals"]
+    assert t["designs"] == 1 and t["removed"] == 1 and t["open_fail"] == 7

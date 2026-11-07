@@ -104,11 +104,16 @@ def test_ciso_sees_the_whole_organisation_but_cannot_change_anything(client):
     assert s["view"] == "compliance" and all("fails" not in d for d in s["designs"])   # no element-level findings
     assert client.get("/ruletrace/audit", headers=CISO).status_code == 200            # oversight may read the record
 
-    # read-only: no uploading, checking, rule or design access
+    # read-only: the compliance lead may look at a design's findings (to approve a sign-off), but can't
+    # upload, load, change, delete or review designs
     assert client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=CISO).status_code == 403
-    assert client.post(f"/ruletrace/designs/{did}/check", headers=CISO, json={}).status_code == 403
-    assert client.get("/ruletrace/designs", headers=CISO).status_code == 403
-    assert client.get("/ruletrace/rules", headers=CISO).status_code == 403
+    assert client.post(f"/ruletrace/designs/{did}/check", headers=CISO, json={}).status_code == 200
+    assert client.get("/ruletrace/designs", headers=CISO).status_code == 200
+    assert client.post(f"/ruletrace/designs/{did}/revise", headers=CISO,
+                       json={"changes": [{"element_id": "ST-3B", "prop": "clear_width", "value": "950 mm"}]}).status_code == 403
+    assert client.post(f"/ruletrace/designs/{did}/findings/review", headers=CISO,
+                       json={"rule_id": "x", "element_id": None, "decision": "confirm"}).status_code == 403
+    assert client.delete(f"/ruletrace/designs/{did}", headers=CISO).status_code == 403
 
 
 def test_posture_is_closed_to_executives_and_outsiders_but_open_to_engineers(client):

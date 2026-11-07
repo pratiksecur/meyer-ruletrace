@@ -46,8 +46,21 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}button
 details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin:8px 0}
 .areas label{display:block;font-size:13px}.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
 .toast.err{background:var(--fail)}
+#rvBox{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:10px;background:#fbfcfd;font-size:12.5px}
+#rvBox .bar{height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin:5px 0}#rvBox .bar i{display:block;height:100%;background:var(--teal)}
+.rv{margin-top:8px;padding:7px 8px;border-radius:8px;background:#f6f8fa;font-size:12.5px}.rv.ok{background:#e8f5ee}.rv.no{background:#f1f3f5}
+.rv textarea{width:100%;font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px;margin-top:4px}
+.rv select{font:inherit;font-size:12px;width:100%;margin-top:4px}.rvb{font-size:11px;border-radius:999px;padding:1px 7px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.rvb.done{border-color:var(--pass);color:var(--pass)}.rvb.todo{border-color:var(--warn);color:var(--warn)}
+#cmp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fff}
+#cmp .v{font-weight:600;margin:4px 0 8px}#cmp .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+#cmp .row3 div{background:var(--bg);border-radius:8px;padding:6px;text-align:center;font-size:12px}#cmp .row3 b{display:block;font-size:20px}
+#cmp .ci{font-size:12.5px;padding:5px 0;border-top:1px solid var(--line);cursor:pointer}#cmp .ci:hover{background:var(--bg)}
+#cmp .x{float:right;border:0;background:transparent;font-size:16px;color:var(--muted);cursor:pointer}
 #part{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fbfcfd}
 #part .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12.5px;margin-top:6px}#part .kv span{color:var(--muted)}
+#part input.ed{width:100%;font:inherit;font-size:12.5px;padding:2px 5px;border:1px solid var(--line);border-radius:5px}
+#part input.ed.changed{border-color:var(--warn);background:#fff7e8}
 #part .x{float:right;border:0;background:transparent;font-size:16px;color:var(--muted);cursor:pointer}
 #parts .grp{margin:8px 0 2px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 #parts .it{padding:4px 8px;display:flex;gap:6px;align-items:center}#legend label{cursor:pointer}
@@ -62,7 +75,7 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
 </head>
 <body>
 <header>
-  <h1>RuleTrace</h1><span class="sub">Check ship designs against SOLAS, Load Line, MARPOL, COLREG, MLC, PVAG and ADA, and see why something fails</span>
+  <h1>RuleTrace</h1><span class="sub">Check ship designs against SOLAS, Load Line, Tonnage, MARPOL, COLREG, MLC, PVAG and ADA, and see why something fails</span>
   <span class="sp"></span>
   <label class="small" for="who">Signed in as</label>
   <select id="who"></select>
@@ -73,6 +86,13 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
   <aside>
     <h2>Design</h2>
     <div id="designs" class="list small"></div>
+    <details id="cmpBox"><summary>Compare two revisions</summary>
+      <div class="small muted" style="margin:4px 0">What did a new revision fix, and did it break anything?</div>
+      <label class="small">Older <select id="cmpA" style="width:100%"></select></label>
+      <label class="small">Newer <select id="cmpB" style="width:100%;margin-top:2px"></select></label>
+      <button id="cmpGo" style="width:100%;margin-top:6px">Compare</button>
+      <div class="small" style="margin-top:4px"><a href="#" id="cmpDemo">Try it: the cruise ship before and after fixes</a></div>
+    </details>
     <details open><summary>Load a sample</summary><div id="samples" class="list small"></div></details>
     <h2>Or upload your own</h2>
     <input type="file" id="file" accept=".ifc,.pdf,.json" aria-label="Design file (.ifc, .pdf or .json)" style="width:100%">
@@ -80,6 +100,7 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
     <button id="up" class="primary" style="width:100%">Upload and check</button>
     <h2>Ship profile</h2>
     <div id="ship" class="small muted">Select a design</div>
+    <details id="shipEd" style="display:none"><summary class="small">Change ship particulars</summary><div id="shipEdBody" class="small"></div></details>
     <div id="interp" class="small" style="display:none"></div>
     <details id="partsBox" style="display:none"><summary>All parts in this design</summary><div id="parts" class="list small"></div></details>
     <h2>Where will it operate?</h2>
@@ -97,6 +118,8 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
     </details>
   </aside>
   <main id="view"><div id="hover"></div>
+    <div id="pend" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:4;background:#16202a;color:#fff;border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:0 4px 16px #0003">
+      <span id="pendTxt"></span> <button id="pendGo" class="primary" style="margin-left:8px">Re-check with my changes</button> <button id="pendNo">Discard</button></div>
     <div id="start"><div class="box"><b style="font-size:18px">How RuleTrace works</b>
       <ol><li><b>Load a ship design</b>: a GA drawing (PDF), an IFC 3D model, or one of our samples.</li>
         <li><b>See the problems on the model</b>: parts that break a rule turn <b style="color:var(--fail)">red</b>.</li>
@@ -107,8 +130,10 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
       <span><span class="dot" style="background:#c4ccd4"></span>not checked</span>
       <label style="margin-left:6px"><input type="checkbox" id="detailed" checked> detailed shapes</label></div></main>
   <aside id="side2">
+    <div id="cmp" style="display:none"></div>
     <div id="part" style="display:none"></div>
-    <h2>Findings</h2>
+    <h2>Findings <button id="rep" style="float:right;font-size:12px;padding:3px 9px;text-transform:none;letter-spacing:0" title="Printable report of this check">Report (PDF)</button></h2>
+    <div id="rvBox" style="display:none"></div>
     <div id="counts" class="counts"></div>
     <div class="filters" id="filters"></div>
     <div id="findings"><div class="muted">Select or upload a design.</div></div>
@@ -122,8 +147,9 @@ pre.yaml{background:#16202a;color:#e6edf3;border-radius:7px;padding:8px;font-siz
 import * as THREE from "three";
 import { OrbitControls } from "/ruletrace/static/OrbitControls.js";
 import { buildPart, label, dimension } from "/ruletrace/static/parts.js";
+import { reportHtml } from "/ruletrace/static/report.js";
 
-const PEOPLE = [{label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+const PEOPLE = [{label:"Aino · compliance lead (approver)", user:"aino", roles:"ciso"},
                 {label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
                 {label:"Ella · admin", user:"ella", roles:"admin"}];
 const AREAS = [["us_ports","US ports (PVAG / ADA)"],["north_american_eca","North American ECA"],["us_caribbean_eca","US Caribbean ECA"],
@@ -136,7 +162,8 @@ let current = null, result = null, filter = "issues", selected = null;
 
 PEOPLE.forEach((p,i) => $("#who").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p.label)}</option>`));
 $("#who").value = store.get("ruletrace.who") || "1";
-$("#who").onchange = () => { store.set("ruletrace.who", $("#who").value); boot(); };
+$("#who").onchange = () => guard(async () => { store.set("ruletrace.who", $("#who").value); await boot();
+  if (current) { rv = await api(`/ruletrace/designs/${current}/reviews`).catch(() => null); renderFindings(); } })();
 AREAS.forEach(([k,l]) => $("#areas").insertAdjacentHTML("beforeend", `<label><input type="checkbox" value="${k}"> ${esc(l)}</label>`));
 
 function headers(){ const p = PEOPLE[+$("#who").value]; return {"X-User":p.user, "X-Roles":p.roles, "X-User-Kind":"human"}; }
@@ -289,9 +316,139 @@ async function boot(){
     clearView(); toast("All designs removed"); await boot();
   });
   if (!designs.length && samples.length) $("#napp").open = false;
+  const opts = designs.map(d => `<option value="${esc(d.id)}">${esc(d.title || d.filename)}</option>`).join("");
+  const keepA = $("#cmpA").value, keepB = $("#cmpB").value;
+  $("#cmpA").innerHTML = opts; $("#cmpB").innerHTML = opts;
+  if (designs.some(d => d.id === keepA)) $("#cmpA").value = keepA; else if (designs.length > 1) $("#cmpA").value = designs[designs.length - 1].id;
+  if (designs.some(d => d.id === keepB)) $("#cmpB").value = keepB; else if (designs.length) $("#cmpB").value = designs[0].id;
   const want = (location.hash.match(/design=([a-z0-9-]+)/) || [])[1];
   if (want && want !== current && designs.some(d => d.id === want)) { history.replaceState(null, "", location.pathname); await open(want); }
 }
+// ---------- engineer review: every open finding needs a human decision, then four-eyes sign-off ----------
+let rv = null, dismissing = null;
+const OPENST = new Set(["fail", "warn", "unknown"]);
+const rkey = f => `${f.rule_id}|${f.element_id || ""}`;
+const locked = () => rv && ["prepared", "approved"].includes((rv.signoff || {}).stage);
+function rvBadge(f){
+  if (!rv) return "";
+  const r = rv.findings[rkey(f)];
+  return r ? `<span class="rvb done" title="${esc(r.by)}">${r.decision === "confirm" ? "✓ confirmed" : "dismissed"}</span>`
+           : `<span class="rvb todo">needs review</span>`;
+}
+function reviewBlock(f){
+  if (!rv) return "";
+  const r = rv.findings[rkey(f)], k = rkey(f);
+  if (r) return `<div class="rv ${r.decision === "confirm" ? "ok" : "no"}"><b>${r.decision === "confirm" ? "✓ Confirmed: must be fixed" : "Dismissed: " + esc(rv.reasons[r.reason_code] || r.reason_code)}</b>
+      <div class="muted">by ${esc(r.by)}, ${esc(new Date(r.at).toLocaleString([], {dateStyle:"short", timeStyle:"short"}))}</div>
+      ${r.reason ? `<div style="margin-top:3px">"${esc(r.reason)}"</div>` : ""}
+      ${locked() ? "" : `<a href="#" data-rvclear="${esc(k)}" class="small">Change decision</a>`}</div>`;
+  if (locked()) return "";
+  if (dismissing === k) return `<div class="rv"><b>Dismiss this finding</b>
+      <select id="rvCode">${Object.entries(rv.reasons).map(([c, l]) => `<option value="${c}">${esc(l)}</option>`).join("")}</select>
+      <textarea id="rvWhy" rows="2" placeholder="Why? e.g. agreed with class in meeting 12; see minutes"></textarea>
+      <div style="margin-top:4px"><button class="primary" data-rvsave="${esc(k)}">Save dismissal</button> <button data-rvcancel="1">Cancel</button></div></div>`;
+  return `<div class="rv"><b>Engineer decision</b> <span class="muted">(required before sign-off)</span><div style="margin-top:5px">
+      <button class="primary" data-rvok="${esc(k)}">Confirm: must be fixed</button> <button data-rvdis="${esc(k)}">Dismiss…</button></div></div>`;
+}
+async function sendReview(k, decision, extra = {}){
+  const [rule_id, element_id] = k.split("|");
+  rv = await api(`/ruletrace/designs/${current}/findings/review`, {method:"POST", body:{rule_id, element_id: element_id || null, decision, ...extra}});
+  dismissing = null; renderFindings();
+}
+function wireReview(){
+  const stop = fn => ev => { ev.preventDefault(); ev.stopPropagation(); guard(fn)(); };
+  document.querySelectorAll("[data-rvok]").forEach(b => b.onclick = stop(() => sendReview(b.dataset.rvok, "confirm")));
+  document.querySelectorAll("[data-rvdis]").forEach(b => b.onclick = stop(() => { dismissing = b.dataset.rvdis; renderFindings(); }));
+  document.querySelectorAll("[data-rvcancel]").forEach(b => b.onclick = stop(() => { dismissing = null; renderFindings(); }));
+  document.querySelectorAll("[data-rvclear]").forEach(b => b.onclick = stop(() => sendReview(b.dataset.rvclear, "clear")));
+  document.querySelectorAll("[data-rvsave]").forEach(b => b.onclick = stop(() => sendReview(b.dataset.rvsave, "dismiss",
+    {reason_code: $("#rvCode").value, reason: $("#rvWhy").value})));
+  document.querySelectorAll("#rvCode, #rvWhy").forEach(e => e.onclick = ev => ev.stopPropagation());
+}
+function renderReviewBox(){
+  const box = $("#rvBox");
+  if (!rv || !result) { box.style.display = "none"; return; }
+  const open = result.findings.filter(f => OPENST.has(f.status)), done = open.filter(f => rv.findings[rkey(f)]).length;
+  const so = rv.signoff || {}, stage = so.stage || "in review", me = PEOPLE[+$("#who").value].user;
+  const btn = (id, label, cls = "") => `<button id="${id}" class="${cls}" style="font-size:12px;padding:4px 9px">${label}</button>`;
+  let action = "";
+  if (stage === "approved") action = `<div style="color:var(--pass);font-weight:600">✓ Approved by ${esc(so.approved_by)}</div>
+      <div class="muted">Prepared by ${esc(so.prepared_by)} · approved ${esc(new Date(so.approved_at).toLocaleString([], {dateStyle:"short", timeStyle:"short"}))}</div>
+      ${rv.can_approve ? `<div style="margin-top:5px">${btn("soReopen", "Reopen")}</div>` : ""}`;
+  else if (stage === "prepared") action = `<div style="font-weight:600">Prepared by ${esc(so.prepared_by)}: waiting for a second person to approve</div>
+      ${rv.can_approve && so.prepared_by !== me ? `<textarea id="soNote" rows="2" style="width:100%;margin-top:4px;font:inherit;font-size:12px" placeholder="Note (required to send back)"></textarea>
+        <div style="margin-top:4px">${btn("soApprove", "Approve", "primary")} ${btn("soReject", "Send back")}</div>`
+        : `<div class="muted" style="margin-top:3px">${so.prepared_by === me ? "You prepared it, so someone else must approve it (four-eyes)." : "Switch to a compliance lead (e.g. Aino) to approve."}</div>
+           ${btn("soReopen", "Reopen")}`}`;
+  else action = `${stage === "rejected" ? `<div style="color:var(--fail);font-weight:600">Sent back by ${esc(so.rejected_by)}: "${esc(so.rejected_note || "")}"</div>` : ""}
+      <div style="margin-top:5px">${btn("soPrep", done === open.length ? "Sign off as prepared" : `Sign off (${open.length - done} still to review)`, done === open.length ? "primary" : "")}</div>`;
+  box.style.display = "";
+  box.innerHTML = `<b>Engineer review</b> <span class="muted">· nothing is accepted automatically</span>
+    <div class="bar"><i style="width:${open.length ? 100 * done / open.length : 100}%"></i></div>
+    <div>${done} of ${open.length} open findings reviewed${open.length ? "" : " (none to review)"}</div>${action}`;
+  const so_ = (stage, note = "") => guard(async () => {
+    rv = await api(`/ruletrace/designs/${current}/signoff`, {method:"POST", body:{stage, note}}); renderFindings();
+    toast({prepared:"Signed off as prepared", approved:"Approved", rejected:"Sent back to the engineer", reopen:"Reopened"}[stage]); })();
+  if ($("#soPrep")) $("#soPrep").onclick = () => done === open.length ? so_("prepared") : toast("Review every open finding first", true);
+  if ($("#soApprove")) $("#soApprove").onclick = () => so_("approved", $("#soNote").value);
+  if ($("#soReject")) $("#soReject").onclick = () => so_("rejected", $("#soNote").value);
+  if ($("#soReopen")) $("#soReopen").onclick = () => so_("reopen");
+}
+
+// ---------- compare two revisions ----------
+async function compareRevisions(a, b, overrides){
+  if (!a || !b || a === b) return toast("Pick two different designs to compare", true);
+  const c = await api(`/ruletrace/designs/${a}/compare/${b}`, {method:"POST", body:{ship_overrides: overrides || {}}});
+  await open(b, overrides);
+  const box = $("#cmp"), bad = c.broken.length, max = Math.max(c.open_before, c.open_after, 1);
+  box.dataset.for = b;
+  const list = (items, how) => items.map(x => `<div class="ci" data-cr="${esc(x.rule_id)}" data-ce="${esc(x.element_id || "")}">
+      <b>${esc(x.title)}</b> <span class="muted">· ${esc(x.element_name || "")}</span><br>
+      <span class="muted">${how(x)}</span></div>`).join("");
+  const vals = x => (x.actual_before != null || x.actual_after != null) ? `${esc(x.actual_before ?? "–")} → ${esc(x.actual_after ?? "–")}` : "";
+  box.style.display = "";
+  box.innerHTML = `<button class="x" title="Close">×</button><b>Revision comparison</b>
+    <div class="small muted">${esc(c.older.title || c.older.file)} → ${esc(c.newer.title || c.newer.file)}</div>
+    <div class="v" style="color:var(--${bad ? "fail" : "pass"})">${esc(c.verdict)}</div>
+    <div class="small">Open problems</div>
+    <div style="display:grid;grid-template-columns:52px 1fr 26px;gap:4px 8px;align-items:center;font-size:12px;margin:4px 0 10px">
+      <span class="muted">before</span><div style="height:12px;background:#9aa6b2;border-radius:0 4px 4px 0;width:${100 * c.open_before / max}%"></div><b>${c.open_before}</b>
+      <span class="muted">after</span><div style="height:12px;background:var(--teal);border-radius:0 4px 4px 0;width:${Math.max(2, 100 * c.open_after / max)}%"></div><b>${c.open_after}</b></div>
+    <div class="row3"><div><b style="color:var(--pass)">${c.fixed.length}</b>fixed</div><div><b>${c.still_open.length}</b>still open</div>
+      <div><b style="color:var(--fail)">${bad}</b>broken by the change</div></div>
+    ${bad ? `<div class="small" style="color:var(--fail);font-weight:600;margin-top:6px">Broken by this revision</div>${list(c.broken, x => `${esc(x.was)} → ${esc(x.now)} · ${vals(x)} · ${esc(x.message || "")}`)}` : ""}
+    ${c.fixed.length ? `<details style="margin-top:6px"><summary class="small"><b style="color:var(--pass)">Fixed (${c.fixed.length})</b></summary>${list(c.fixed, x => `${esc(x.was)} → ${esc(x.now)} · ${vals(x)}`)}</details>` : ""}
+    ${c.still_open.length ? `<details><summary class="small"><b>Still open (${c.still_open.length})</b></summary>${list(c.still_open, x => `${vals(x)} · needs ${esc(x.required || "")}`)}</details>` : ""}
+    ${c.parts_changed.length || c.parts_added.length || c.parts_removed.length || c.ship_changes.length ? `<details><summary class="small"><b>What changed in the design (${c.parts_changed.length + c.parts_added.length + c.parts_removed.length + c.ship_changes.length})</b></summary>
+      ${c.ship_changes.map(d => `<div class="ci">Ship: ${esc(human(d.what))}: ${esc(JSON.stringify(d.before))} → ${esc(JSON.stringify(d.after))}</div>`).join("")}
+      ${c.parts_changed.map(p => `<div class="ci" data-cp="${esc(p.id)}"><b>${esc(p.name)}</b><br><span class="muted">${p.changes.map(d => `${esc(human(d.what))}: ${esc(Array.isArray(d.before) ? "moved / resized" : d.before ?? "–")}${Array.isArray(d.before) ? "" : " → " + esc(d.after ?? "–")}`).join("; ")}</span></div>`).join("")}
+      ${c.parts_added.map(p => `<div class="ci" data-cp="${esc(p.id)}">Added: <b>${esc(p.name)}</b></div>`).join("")}
+      ${c.parts_removed.map(p => `<div class="ci">Removed: <b>${esc(p.name)}</b></div>`).join("")}</details>` : ""}`;
+  box.querySelector(".x").onclick = () => { box.style.display = "none"; };
+  box.querySelectorAll("[data-cr]").forEach(e => e.onclick = () => {
+    const i = result.findings.findIndex(f => f.rule_id === e.dataset.cr && (f.element_id || "") === e.dataset.ce);
+    if (i >= 0) { filter = "all"; renderFindings(); select(i); } });
+  box.querySelectorAll("[data-cp]").forEach(e => e.onclick = () => { if (meshes.get(e.dataset.cp)) selectPart(e.dataset.cp); });
+  box.scrollIntoView({block:"start"});
+}
+$("#rep").onclick = guard(async () => {
+  if (!result) return toast("Select a design first", true);
+  const chain = await api("/audit/verify").catch(() => null);
+  rv = await api(`/ruletrace/designs/${current}/reviews`).catch(() => rv);
+  const w = window.open("", "_blank");
+  if (!w) return toast("Allow pop-ups to open the report", true);
+  w.document.write(reportHtml(result, {user: PEOPLE[+$("#who").value].label, chain, reviews: rv,
+    title: (document.querySelector("#designs .it.sel b") || {}).textContent}));
+  w.document.close();
+});
+$("#cmpGo").onclick = guard(() => compareRevisions($("#cmpA").value, $("#cmpB").value));
+$("#cmpDemo").onclick = guard(async ev => {
+  ev.preventDefault();
+  const a = await api("/ruletrace/designs/sample/demo_cruise_deck7", {method:"POST"});
+  const b = await api("/ruletrace/designs/sample/demo_cruise_deck7_fixed", {method:"POST"});
+  await boot(); $("#cmpA").value = a.id; $("#cmpB").value = b.id; await compareRevisions(a.id, b.id);
+});
+
 // ---------- every part, in detail ----------
 const TYPE_NAMES = {stair:"Stairs", corridor:"Corridors", door:"Doors", weather_door:"Weathertight doors", ramp:"Ramps", ventilator:"Ventilators",
   air_pipe:"Air pipes", guard_rail:"Guard rails", cabin:"Cabins", hospital:"Hospital", space:"Other spaces", bulkhead:"Bulkheads",
@@ -309,18 +466,82 @@ function renderPart(id){
   const b = el.box;
   const geo = b ? [["Size (L × W × H)", `${b[3].toFixed(2)} × ${b[4].toFixed(2)} × ${b[5].toFixed(2)} m`],
                    ["Position (x, y, z)", `${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)} m`]] : [];
+  if (editing === id) return renderEdit(el, fs);
   const rows = [["Kind", (TYPE_NAMES[el.type] || human(el.type)).replace(/s$/, "")], ["ID", el.id], ...(el.deck ? [["Deck", el.deck]] : []),
     ...(el.zone ? [["Zone", el.zone]] : []), ...geo, ...Object.entries(el.props || {}).map(([k, v]) => [human(k), v === true ? "yes" : v === false ? "no" : v]),
     ...(el.source ? [["Read from", el.source]] : []), ...(el.mesh ? [["3D shape", `the model's own geometry (${el.mesh.f.length / 3} triangles)`]] : [])];
   box.style.display = "";
   box.innerHTML = `<button class="x" title="Close">×</button><b>${esc(el.name || el.id)}</b>
+    ${el.box || Object.keys(el.props || {}).length ? `<div><button id="edBtn" style="margin-top:6px;font-size:12px;padding:3px 9px">Change measurements</button></div>` : ""}
     <div class="kv">${rows.map(([k, v]) => `<span>${esc(k)}</span><b style="font-weight:500">${esc(v)}</b>`).join("")}</div>
     <div style="margin-top:8px" class="small"><b>Checks on this part (${fs.length})</b>${fs.length ? fs.map(([f, i]) =>
       `<div style="margin-top:3px;cursor:pointer" data-fi="${i}"><span class="pill ${f.status}">${statusLabel(f.status)}</span> ${esc(f.title)}</div>`).join("")
       : `<div class="muted">No rule applies to this part on this ship.</div>`}</div>`;
   box.querySelector(".x").onclick = () => { box.style.display = "none"; highlight([]); annotate(null); };
+  if ($("#edBtn")) $("#edBtn").onclick = () => { editing = id; renderPart(id); };
   box.querySelectorAll("[data-fi]").forEach(e => e.onclick = () => { filter = "all"; renderFindings(); select(+e.dataset.fi); });
 }
+// ---------- change measurements and re-check ("what if this stair were 950 mm wide?") ----------
+let editing = null, pending = new Map(), pendingShip = {};
+const SHIP_FIELDS = [["length_m", "Length (m)"], ["breadth_m", "Breadth (m)"], ["gross_tonnage", "Gross tonnage"],
+  ["enclosed_volume_m3", "Enclosed volume (m³)"], ["passengers", "Passengers"], ["persons_total", "Persons on board"]];
+function renderShipEdit(){
+  const s = result.ship;
+  $("#shipEd").style.display = "";
+  $("#shipEdBody").innerHTML = `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:center;margin-top:4px">
+    ${SHIP_FIELDS.map(([k, l]) => `<span class="muted">${l}</span><input data-sp="${k}" value="${esc(pendingShip[k] ?? s[k] ?? "")}"
+      style="font:inherit;padding:2px 5px;border:1px solid ${k in pendingShip ? "var(--warn)" : "var(--line)"};border-radius:5px">`).join("")}</div>`;
+  document.querySelectorAll("[data-sp]").forEach(inp => inp.addEventListener("input", () => {
+    const k = inp.dataset.sp, v = +String(inp.value).replace(",", ".");
+    if (inp.value.trim() === "" || isNaN(v) || v === +s[k]) delete pendingShip[k]; else pendingShip[k] = v;
+    inp.style.borderColor = k in pendingShip ? "var(--warn)" : "var(--line)"; pendBar(); }));
+}
+function renderEdit(el, fs){
+  const box = $("#part"), b = el.box;
+  const val = (prop, v) => pending.has(el.id + "|" + prop) ? pending.get(el.id + "|" + prop).value : v;
+  const field = (label, prop, v) => {
+    const cur = val(prop, v), ch = pending.has(el.id + "|" + prop);
+    return typeof v === "boolean"
+      ? `<span>${esc(label)}</span><label><input type="checkbox" data-ep="${esc(prop)}" ${cur ? "checked" : ""}> ${cur ? "yes" : "no"}</label>`
+      : `<span>${esc(label)}</span><input class="ed ${ch ? "changed" : ""}" data-ep="${esc(prop)}" data-num="${typeof v === "number" ? 1 : ""}" value="${esc(cur ?? "")}">`;
+  };
+  const sizes = b ? [["Length (m)", "length", +b[3].toFixed(3)], ["Width (m)", "width", +b[4].toFixed(3)], ["Height (m)", "height", +b[5].toFixed(3)]] : [];
+  box.style.display = "";
+  box.innerHTML = `<button class="x" title="Stop editing">×</button><b>Change measurements: ${esc(el.name || el.id)}</b>
+    <div class="small muted" style="margin-top:2px">Type new values (with units, e.g. 950 mm). The original design is kept; your changes are checked as a new revision.</div>
+    <div class="kv" style="align-items:center">${sizes.map(([l, p, v]) => field(l, p, v)).join("")}
+      ${Object.entries(el.props || {}).filter(([k]) => !["label", "position", "source", "role"].includes(k)).map(([k, v]) => field(human(k), k, v)).join("")}</div>
+    <div style="margin-top:8px"><button id="edDone" style="font-size:12px;padding:3px 9px">Done with this part</button></div>`;
+  box.querySelector(".x").onclick = () => { editing = null; renderPart(el.id); };
+  $("#edDone").onclick = () => { editing = null; renderPart(el.id); };
+  box.querySelectorAll("[data-ep]").forEach(inp => {
+    const prop = inp.dataset.ep, orig = ["length", "width", "height"].includes(prop) ? +b[{length: 3, width: 4, height: 5}[prop]].toFixed(3) : (el.props || {})[prop];
+    const commit = () => {
+      let v = inp.type === "checkbox" ? inp.checked : inp.value.trim();
+      if (inp.dataset.num && v !== "" && !isNaN(+v)) v = +v;
+      if (["length", "width", "height"].includes(prop)) v = +String(v).replace(",", ".");
+      if (String(v) === String(orig)) pending.delete(el.id + "|" + prop); else pending.set(el.id + "|" + prop, {element_id: el.id, prop, value: v});
+      inp.classList.toggle("changed", pending.has(el.id + "|" + prop)); pendBar();
+    };
+    inp.addEventListener(inp.type === "checkbox" ? "change" : "input", commit);
+  });
+}
+function pendBar(){
+  const n = pending.size + Object.keys(pendingShip).length; $("#pend").style.display = n ? "" : "none";
+  $("#pendTxt").textContent = `${n} change${n === 1 ? "" : "s"} not checked yet`;
+}
+$("#pendNo").onclick = () => { pending.clear(); pendingShip = {}; pendBar(); if (editing) renderPart(editing); if (result) renderShipEdit(); };
+$("#pendGo").onclick = guard(async () => {
+  const orig = current, changes = [...pending.values()];
+  $("#pendGo").disabled = true;
+  try {
+    const whatIf = {...(result.what_if || {})};          // keep the profile the engineer is checking with (keel date, sea areas)
+    const r = await api(`/ruletrace/designs/${orig}/revise`, {method:"POST", body:{changes, ship: pendingShip}});
+    pending.clear(); pendingShip = {}; pendBar(); editing = null;
+    await boot(); await compareRevisions(orig, r.id, whatIf);
+    toast(`${r.changes.length} change(s) checked as a new revision`);
+  } finally { $("#pendGo").disabled = false; }
+});
 function renderPartsList(){
   const els = result.elements;
   const groups = {};
@@ -339,13 +560,18 @@ function clearView(){
   $("#counts").innerHTML = ""; $("#filters").innerHTML = ""; $("#na").innerHTML = ""; $("#meta").innerHTML = "";
   $("#findings").innerHTML = `<div class="muted">Select or upload a design.</div>`;
   $("#ship").className = "small muted"; $("#ship").textContent = "Select a design"; $("#interp").style.display = "none";
-  $("#part").style.display = "none"; $("#partsBox").style.display = "none"; annot = null;
+  $("#part").style.display = "none"; $("#partsBox").style.display = "none"; $("#shipEd").style.display = "none"; annot = null;
   $("#start").style.display = "";
 }
 async function open(id, overrides){
+  if (current && id !== current && (pending.size || Object.keys(pendingShip).length)) { pending.clear(); pendingShip = {}; pendBar(); }
+  editing = null;
+  if ($("#cmp").dataset.for && $("#cmp").dataset.for !== id) $("#cmp").style.display = "none";
   current = id; aiCache.clear();
   document.querySelectorAll("#designs .it").forEach(e => e.classList.toggle("sel", e.dataset.id === id));
   result = await api(`/ruletrace/designs/${id}/check`, {method:"POST", body:{ship_overrides: overrides || {}}});
+  rv = await api(`/ruletrace/designs/${id}/reviews`).catch(() => null);
+  if (rv && overrides && Object.keys(overrides).length) api(`/ruletrace/designs/${id}/reviews/profile`, {method:"POST", body: overrides}).catch(() => {});
   const s = result.ship;
   $("#ship").className = "small";
   $("#ship").innerHTML = `<b>${esc(s.name)}</b><br>${esc(s.ship_type.replace("_"," "))} · ${s.passengers} passengers · ${s.persons_total || "?"} persons · ${s.length_m} × ${s.breadth_m} m · ${s.gross_tonnage ? Number(s.gross_tonnage).toLocaleString() + " GT" : "GT not given"} · flag ${esc(s.flag || "–")}`
@@ -365,25 +591,27 @@ async function open(id, overrides){
   }
   document.querySelectorAll("#areas input").forEach(i => i.checked = (s.operating_areas || []).includes(i.value));
   $("#keel").value = s.keel_laid || "";
-  buildScene(); renderFindings(); renderPartsList(); $("#part").style.display = "none";
+  buildScene(); renderFindings(); renderPartsList(); renderShipEdit(); $("#part").style.display = "none";
   $("#start").style.display = "none";
   $("#meta").innerHTML = `<span title="design ${esc(result.design_sha256)} · rule pack ${esc(result.rules_sha256)}">Saved in the check history as #${result.audit_seq}</span>`
     + (Object.keys(result.what_if||{}).length ? `<br>What-if: ${esc(JSON.stringify(result.what_if))}` : "");
 }
 function renderFindings(){
   const c = result.counts;
+  renderReviewBox();
   $("#counts").innerHTML = ["fail","warn","unknown","pass"].map(s => `<div><b style="color:var(--${s})">${c[s]}</b>${statusLabel(s)}</div>`).join("");
   const F = {issues:"Issues", fail:"Fails", warn:"Warnings", unknown:"Can't check", all:"All"};
   $("#filters").innerHTML = Object.entries(F).map(([k,l]) => `<button class="${filter===k?"on":""}" data-f="${k}">${l}</button>`).join("");
   document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter = b.dataset.f; renderFindings(); });
   const show = result.findings.map((f,i) => [f,i]).filter(([f]) => filter === "all" || (filter === "issues" ? f.status !== "pass" : f.status === filter));
   $("#findings").innerHTML = show.length ? show.map(([f,i]) => `<div class="f ${selected===i?"sel":""}" data-i="${i}">
-    <div class="h"><span class="t">${esc(f.title)}</span><span class="pill ${f.status}">${statusLabel(f.status)}</span></div>
+    <div class="h"><span class="t">${esc(f.title)}</span>${f.status !== "pass" ? rvBadge(f) : ""}<span class="pill ${f.status}">${statusLabel(f.status)}</span></div>
     <div class="small muted">${esc(f.element_name)}${f.deck?" · "+esc(f.deck):""} · ${esc(f.ref)}</div>
     ${selected===i ? detail(f) : `<div class="small" style="margin-top:3px">${esc(f.message)}</div>`}</div>`).join("")
     : `<div class="muted">Nothing in this filter.</div>`;
   document.querySelectorAll(".f").forEach(e => e.onclick = () => select(+e.dataset.i));
   document.querySelectorAll("[data-ai]").forEach(b => b.onclick = ev => { ev.stopPropagation(); explainOne(+b.dataset.ai); });
+  wireReview();
   $("#na").innerHTML = result.rules_not_applicable.length ? result.rules_not_applicable.map(r => `<div style="margin:6px 0"><b>${esc(r.title)}</b> <span class="muted">${esc(r.regime)} ${esc(r.ref)}</span>
       <div class="muted">${r.reasons.map(esc).join("; ")}</div></div>`).join("") : "All rules in the pack apply.";
 }
@@ -396,7 +624,8 @@ function detail(f){
     ${f.quote ? `<div class="quote">"${esc(f.quote)}"</div>` : ""}
     <div class="small"><span class="badge ${f.verified?"":"unv"}">${f.verified?"value checked against published text":"value not yet verified: confirm with the official text"}</span>
     ${f.source_url ? ` <a href="${esc(f.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</div>
-    ${f.status === "fail" || f.status === "warn" ? aiBlock(f) : ""}`;
+    ${f.status === "fail" || f.status === "warn" ? aiBlock(f) : ""}
+    ${f.status !== "pass" ? reviewBlock(f) : ""}`;
 }
 function select(i){
   selected = i; renderFindings();

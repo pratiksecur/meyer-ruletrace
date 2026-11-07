@@ -56,3 +56,47 @@ def test_check_result_carries_part_details(client):
     r = client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={}).json()
     assert any(e.get("mesh") and e["mesh"]["f"] for e in r["elements"])  # the IFC model's own triangles
     assert client.get("/ruletrace/static/parts.js").status_code == 200
+
+
+def test_compare_revisions(client):
+    a = client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
+    b = client.post("/ruletrace/designs/sample/demo_cruise_masthead_cascade", headers=ENG).json()["id"]
+    c = client.post(f"/ruletrace/designs/{a}/compare/{b}", headers=ENG).json()
+    assert [x["rule_id"] for x in c["fixed"]] == ["COLREG-ANNEX-I-2a-i-MASTHEAD-HEIGHT"]
+    assert [x["rule_id"] for x in c["broken"]] == ["COLREG-ANNEX-I-2a-ii-MASTHEAD-SEPARATION"]   # the knock-on effect
+    assert c["parts_changed"][0]["changes"][0]["what"] == "height_above_hull"
+    assert client.post(f"/ruletrace/designs/{a}/compare/{a}", headers=ENG).status_code == 400
+    assert client.post(f"/ruletrace/designs/{a}/compare/{b}", headers=CEO).status_code == 403
+
+
+def test_gross_tonnage_from_volume(client):
+    did = client.post("/ruletrace/designs/sample/demo_cargo_ship", headers=ENG).json()["id"]
+    r = client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={}).json()
+    gt = next(f for f in r["findings"] if f["rule_id"] == "ITC69-REG3-GROSS-TONNAGE-LOW")
+    assert gt["status"] == "fail" and gt["required"] == "at least 9783"
+    ok = client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={"ship_overrides": {"gross_tonnage": 9881}}).json()
+    assert all(f["status"] == "pass" for f in ok["findings"] if f["rule_id"].startswith("ITC69"))
+
+
+def test_change_measurements_and_recheck(client):
+    did = client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
+    r = client.post(f"/ruletrace/designs/{did}/revise", headers=ENG, json={"changes": [
+        {"element_id": "ST-3B", "prop": "clear_width", "value": "950 mm"},
+        {"element_id": "COR-7-4", "prop": "clear_width", "value": "860 mm"}]}).json()
+    assert r["revision_of"] == did and len(r["changes"]) == 2
+    c = client.post(f"/ruletrace/designs/{did}/compare/{r['id']}", headers=ENG).json()
+    assert ("FSS-13.2.1.1-STAIR-WIDTH", "ST-3B") in {(x["rule_id"], x["element_id"]) for x in c["fixed"]}
+    assert any(p["id"] == "COR-7-4" for p in c["parts_changed"])
+    assert client.post(f"/ruletrace/designs/{did}/revise", headers=ENG, json={"changes": [
+        {"element_id": "NOPE", "prop": "x", "value": 1}]}).status_code == 400
+    assert client.post(f"/ruletrace/designs/{did}/revise", headers=ENG, json={"changes": [
+        {"element_id": "ST-3B", "prop": "height", "value": "-3"}]}).status_code == 400
+    assert client.get("/audit/verify", headers=ENG).json()["ok"]
+
+
+def test_change_ship_particulars(client):
+    did = client.post("/ruletrace/designs/sample/demo_cargo_ship", headers=ENG).json()["id"]
+    r = client.post(f"/ruletrace/designs/{did}/revise", headers=ENG, json={"ship": {"gross_tonnage": 9881}}).json()
+    c = client.post(f"/ruletrace/designs/{did}/compare/{r['id']}", headers=ENG).json()
+    assert "ITC69-REG3-GROSS-TONNAGE-LOW" in [x["rule_id"] for x in c["fixed"]]
+    assert client.post(f"/ruletrace/designs/{did}/revise", headers=ENG, json={"ship": {"name": "x"}}).status_code == 400

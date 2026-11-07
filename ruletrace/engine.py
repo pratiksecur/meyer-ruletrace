@@ -11,6 +11,7 @@ Design choices that serve accuracy:
 from __future__ import annotations
 
 import ast
+import math
 import operator
 import re
 from dataclasses import dataclass, field
@@ -23,6 +24,8 @@ from vartija_core.quantities import QuantityError, check_requirement, parse_quan
 from .model import Design, Element, Ship
 
 RULES_DIR = Path(__file__).parent / "rules"
+# Company rules approved by engineers (see rulesets_api: approve, then activate). Set by the app at start-up.
+ACTIVE_RULE_DIRS: list[Path] = []
 FIRE_CLASS_ORDER = ["C", "B-0", "B-15", "A-0", "A-15", "A-30", "A-60"]
 STATUS_ORDER = {"fail": 0, "warn": 1, "unknown": 2, "pass": 3}
 
@@ -50,7 +53,8 @@ class Rule:
 
 
 def load_rules(paths: list[Path] | None = None) -> list[Rule]:
-    files = paths or sorted(RULES_DIR.glob("*.yaml"))
+    files = paths or (sorted(RULES_DIR.glob("*.yaml"))
+                      + [f for d in ACTIVE_RULE_DIRS if Path(d).exists() for f in sorted(Path(d).glob("*.yaml"))])
     rules: list[Rule] = []
     seen: set[str] = set()
     for f in files:
@@ -111,6 +115,9 @@ def applicability(rule: Rule, ship: Ship) -> tuple[bool, list[str]]:
     if "gross_tonnage_at_least" in a:
         n = a["gross_tonnage_at_least"]
         test(ship.gross_tonnage >= n, f"{ship.gross_tonnage:g} GT (≥ {n})", f"only for ships of {n} GT or more")
+    if a.get("enclosed_volume_given"):
+        test(ship.enclosed_volume_m3 > 0, f"enclosed volume {ship.enclosed_volume_m3:g} m3 given",
+             "the ship profile doesn't give the enclosed volume (needed to work out the gross tonnage)")
     if "operating_areas_any" in a:
         hit = sorted(set(a["operating_areas_any"]) & set(ship.operating_areas))
         test(bool(hit), f"operates in {', '.join(hit)}",
@@ -147,6 +154,11 @@ class _Ctx:
             return {"min": min, "max": max}[name](*args)
         if name == "round":
             return round(*args)
+        if name == "tonnage_gt":     # Tonnage Convention 1969, Annex I reg. 3: GT = K1 * V, K1 = 0.2 + 0.02 log10 V
+            v = float(args[0])
+            if v <= 0:
+                raise LookupError("the enclosed volume is not given")
+            return (0.2 + 0.02 * math.log10(v)) * v
         if name == "ref":           # ref(role, property, unit) -> number
             role, prop, unit = args
             el = self.find(role)
