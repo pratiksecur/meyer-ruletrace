@@ -150,7 +150,8 @@ async function refresh() {
     const accLine = () => { const m = (status.models || []).find(x => x.id === $c("#cpModel").value);
       $c("#cpModelAcc").innerHTML = m?.accuracy ? `Measured on 38 test questions: ${pct(m.accuracy.verified)} of answers passed every check,
         ${pct(m.accuracy.citation_precision)} of citations support their sentence, ${pct(m.accuracy.correct_not_found)} correct "not found". Answers that fail the checks are never shown as answers.`
-        : m?.id === "auto" ? "Groq's best model; the local model if Groq is unavailable. Every rule answer is checked in code, whatever the model." : ""; };
+        : m?.id === "auto" ? (status.confidential ? "The local Ollama model on this computer. Every rule answer is checked in code, whatever the model."
+          : "Groq's best model; the local model if Groq is unavailable. Every rule answer is checked in code, whatever the model.") : ""; };
     $c("#cpModel").onchange = accLine; accLine();
   }
 }
