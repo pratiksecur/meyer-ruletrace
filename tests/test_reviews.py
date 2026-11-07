@@ -37,10 +37,11 @@ def test_every_open_finding_needs_a_human_decision_before_sign_off(client):
 
 
 def test_same_person_cannot_prepare_and_approve(client):
+    ella = {"X-User": "ella", "X-Roles": "admin"}       # an admin may both review and approve, but not the same check
     did, open_ = _design(client)
     for f in open_:
-        client.post(f"/ruletrace/designs/{did}/findings/review", headers=AINO,
+        client.post(f"/ruletrace/designs/{did}/findings/review", headers=ella,
                     json={"rule_id": f["rule_id"], "element_id": f["element_id"], "decision": "confirm"})
-    client.post(f"/ruletrace/designs/{did}/signoff", headers=AINO, json={"stage": "prepared"})
-    r = client.post(f"/ruletrace/designs/{did}/signoff", headers=AINO, json={"stage": "approved"})
+    client.post(f"/ruletrace/designs/{did}/signoff", headers=ella, json={"stage": "prepared"})
+    r = client.post(f"/ruletrace/designs/{did}/signoff", headers=ella, json={"stage": "approved"})
     assert r.status_code == 403 and "four-eyes" in r.json()["detail"]

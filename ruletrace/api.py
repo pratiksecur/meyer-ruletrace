@@ -159,13 +159,13 @@ def make_router(app) -> APIRouter:
                  "payload": e.payload, "prev_hash": e.prev_hash, "entry_hash": e.entry_hash} for e in entries]}
 
     @router.get("/rules")
-    def rules(who: Principal = Depends(engineer)) -> dict:
+    def rules(who: Principal = Depends(oversight)) -> dict:
         rs = load_rules()
         return {"count": len(rs), "sha256": _rules_sha(rs),
                 "rules": [{k: v for k, v in r.__dict__.items()} for r in rs]}
 
     @router.get("/samples")
-    def samples(who: Principal = Depends(engineer)) -> list[dict]:
+    def samples(who: Principal = Depends(oversight)) -> list[dict]:
         out = []
         for p in sorted(SAMPLES.glob("*.json")):
             if p.stem.endswith(".expected"):  # answer key for scripts/evaluate.py, not a design
@@ -228,7 +228,7 @@ def make_router(app) -> APIRouter:
         return _save(design, data, name, who)
 
     @router.get("/designs")
-    def list_designs(who: Principal = Depends(engineer)) -> list[dict]:
+    def list_designs(who: Principal = Depends(oversight)) -> list[dict]:
         out = []
         for p in sorted(store.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if store.exists() else []:
             rec = json.loads(p.read_text(encoding="utf-8"))
@@ -238,7 +238,7 @@ def make_router(app) -> APIRouter:
         return out
 
     @router.get("/designs/{design_id}")
-    def get_design(design_id: str, who: Principal = Depends(engineer)) -> dict:
+    def get_design(design_id: str, who: Principal = Depends(oversight)) -> dict:
         return json.loads(_path(design_id).read_text(encoding="utf-8"))
 
     @router.delete("/designs/{design_id}")
@@ -247,7 +247,7 @@ def make_router(app) -> APIRouter:
         return {"deleted": design_id}
 
     @router.post("/designs/{design_id}/check")
-    def check(design_id: str, body: CheckIn | None = None, who: Principal = Depends(engineer)) -> dict:
+    def check(design_id: str, body: CheckIn | None = None, who: Principal = Depends(oversight)) -> dict:
         rec = json.loads(_path(design_id).read_text(encoding="utf-8"))
         d = rec["design"]
         overrides = (body.ship_overrides if body else {}) or {}
@@ -279,12 +279,12 @@ def make_router(app) -> APIRouter:
     add_llm_routes(app, router, engineer, _path)
 
     from .rulesets_api import add_ruleset_routes  # proposed rule sets: read a regulation document, analyse it
-    add_ruleset_routes(app, router, engineer, store)
+    add_ruleset_routes(app, router, engineer, store, reader=oversight)
 
     from .revisions import add_revision_routes  # compare two revisions of a design
-    add_revision_routes(app, router, engineer, _path)
+    add_revision_routes(app, router, engineer, _path, reader=oversight)
 
     from .reviews import add_review_routes  # human review of findings and four-eyes sign-off
-    add_review_routes(app, router, engineer, _path)
+    add_review_routes(app, router, engineer, _path, reader=oversight)
 
     return router

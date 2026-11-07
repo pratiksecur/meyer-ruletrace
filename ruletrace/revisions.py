@@ -156,7 +156,8 @@ def compare_results(old: dict, new: dict) -> dict:
             "parts_changed": changed, "parts_added": added, "parts_removed": removed, "ship_changes": ship_changes}
 
 
-def add_revision_routes(app, router, engineer, path_of) -> None:
+def add_revision_routes(app, router, engineer, path_of, reader=None) -> None:
+    reader = reader or engineer
     def _check(design_id: str, overrides: dict | None = None) -> tuple[dict, dict]:
         rec = json.loads(path_of(design_id).read_text(encoding="utf-8"))
         bad = set(overrides or {}) - SHIP_EDITABLE
@@ -196,7 +197,7 @@ def add_revision_routes(app, router, engineer, path_of) -> None:
         return {"id": nid, "revision_of": design_id, "changes": log, "title": new_design["title"], "existing_designs": n}
 
     @router.post("/designs/{older}/compare/{newer}")
-    def compare(older: str, newer: str, body: CompareIn | None = None, who: Principal = Depends(engineer)) -> dict:
+    def compare(older: str, newer: str, body: CompareIn | None = None, who: Principal = Depends(reader)) -> dict:
         if older == newer:
             raise HTTPException(400, "pick two different revisions")
         ov = (body.ship_overrides if body else {}) or {}

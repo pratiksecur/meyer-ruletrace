@@ -82,7 +82,8 @@ def load(store: Path, design_id: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"findings": {}, "signoff": {}, "history": []}
 
 
-def add_review_routes(app, router, engineer, path_of) -> None:
+def add_review_routes(app, router, engineer, path_of, reader=None) -> None:
+    reader = reader or engineer  # who may read reviews and sign off: engineers and the compliance lead
     store = Path(app.state.settings.upload_dir) / "ruletrace" / "reviews"
 
     def _save(design_id: str, rec: dict) -> None:
@@ -104,7 +105,7 @@ def add_review_routes(app, router, engineer, path_of) -> None:
             return e.seq
 
     @router.get("/designs/{design_id}/reviews")
-    def get_reviews(design_id: str, who: Principal = Depends(engineer)) -> dict:
+    def get_reviews(design_id: str, who: Principal = Depends(reader)) -> dict:
         path_of(design_id)
         rec = load(store, design_id)
         return {**rec, "can_approve": is_approver(who), "reasons": DISMISS_REASONS}
@@ -137,7 +138,7 @@ def add_review_routes(app, router, engineer, path_of) -> None:
         return {**rec, "can_approve": is_approver(who), "reasons": DISMISS_REASONS}
 
     @router.post("/designs/{design_id}/signoff")
-    def signoff(design_id: str, body: SignoffIn, who: Principal = Depends(engineer)) -> dict:
+    def signoff(design_id: str, body: SignoffIn, who: Principal = Depends(reader)) -> dict:
         if who.kind != "human":
             raise HTTPException(403, "only a person can sign off")
         drec, findings = _findings(design_id, (load(store, design_id).get("profile") or {}))

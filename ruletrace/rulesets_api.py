@@ -64,7 +64,8 @@ class RuleReviewIn(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
-def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
+def add_ruleset_routes(app, router, engineer, design_store: Path, reader=None) -> None:
+    reader = reader or engineer  # engineers and the compliance lead may read rule sets; only approvers activate
     store = Path(app.state.settings.upload_dir) / "ruletrace" / "rulesets"
     active = Path(app.state.settings.upload_dir) / "ruletrace" / "rules_active"
     engine.ACTIVE_RULE_DIRS[:] = [active]       # approved and activated company rules join the rule pack
@@ -145,7 +146,7 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return (STATIC / "rulesets.html").read_text(encoding="utf-8")
 
     @router.get("/rulesets")
-    def list_rulesets(who: Principal = Depends(engineer)) -> dict:
+    def list_rulesets(who: Principal = Depends(reader)) -> dict:
         recs = [json.loads(p.read_text(encoding="utf-8")) for p in
                 sorted(store.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)] if store.exists() else []
         return {"rulesets": [_summary(r) for r in recs],
@@ -170,11 +171,11 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return _ingest(p.read_bytes(), p.name, p.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").split(":")[0], False, who)
 
     @router.get("/rulesets/{rid}")
-    def get_ruleset(rid: str, who: Principal = Depends(engineer)) -> dict:
+    def get_ruleset(rid: str, who: Principal = Depends(reader)) -> dict:
         return _analyse(json.loads(_path(rid).read_text(encoding="utf-8")), who)
 
     @router.get("/rulesets/{rid}/yaml", response_class=PlainTextResponse)
-    def ruleset_yaml(rid: str, who: Principal = Depends(engineer)) -> str:
+    def ruleset_yaml(rid: str, who: Principal = Depends(reader)) -> str:
         rec = json.loads(_path(rid).read_text(encoding="utf-8"))
         clean = [{k: v for k, v in r.items() if k != "extracted_by"} for r in rec["rules"]]
         return (f"# Draft rules from {rec['filename']} ({rec['name']}). DRAFT: verified: false on every rule.\n"
@@ -208,7 +209,7 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return _analyse(rec, who)
 
     @router.post("/rulesets/{rid}/activate")
-    def activate(rid: str, who: Principal = Depends(engineer)) -> dict:
+    def activate(rid: str, who: Principal = Depends(reader)) -> dict:
         """A second person with an approver role puts the approved rules into use (four-eyes)."""
         p = _path(rid)
         rec = json.loads(p.read_text(encoding="utf-8"))
@@ -240,7 +241,7 @@ def add_ruleset_routes(app, router, engineer, design_store: Path) -> None:
         return _analyse(rec, who)
 
     @router.post("/rulesets/{rid}/deactivate")
-    def deactivate(rid: str, who: Principal = Depends(engineer)) -> dict:
+    def deactivate(rid: str, who: Principal = Depends(reader)) -> dict:
         p = _path(rid)
         rec = json.loads(p.read_text(encoding="utf-8"))
         if not is_approver(who):
