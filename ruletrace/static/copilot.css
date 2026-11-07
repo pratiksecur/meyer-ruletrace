@@ -72,3 +72,5 @@ header .cpbtn:hover{background:#2a82c2}
 .cp .conf{font-size:12px;border-radius:8px;padding:6px 9px;margin-bottom:8px}
 .cp .conf.on{background:#e9f5ee;color:#1d5c38;border:1px solid #bfe0cc}
 .cp .conf.off{background:#fff3e0;color:#7a4b00;border:1px solid #f0d3a6}
+.cp #cpAcc table{font-size:11px;display:block;overflow-x:auto}
+.cp #cpAcc td,.cp #cpAcc th{padding:3px 4px}

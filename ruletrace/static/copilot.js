@@ -190,7 +190,7 @@ async function ask() {
   finally { $c("#cpAsk").disabled = false; }
 }
 const refCls = s => s.startsWith("loaded") ? "ok" : s.startsWith("named") ? "warn" : "bad";
-const ACC_HINT = "91% of rule answers pass every check, 96% of citations support their sentence (see Accuracy)";
+const ACC_HINT = "on fresh test questions, 100% of citations support their sentence and 92% of answers pass every check (see Accuracy)";
 function generalBox(a) {
   const g = a.general; if (!g) return "";
   if (!g.ok) return `<div class="ans gen"><div class="meta"><span class="badge2 general">general answer</span></div>
@@ -280,15 +280,20 @@ function readingsChart(pairs, title) {  // [[label, value, max]]
 async function accuracy() {
   try { const a = await call("/ruletrace/copilot/accuracy");
     const M = a.models || [], pc = v => v == null ? "–" : Math.round(v * 100) + "%";
-    const best = M.length ? M.reduce((x, y) => (y.verified ?? -1) > (x.verified ?? -1) ? y : x) : null;
+    const best = M.length ? M.reduce((x, y) => (y.verified ?? -1) + (y.citation_precision ?? 0) > (x.verified ?? -1) + (x.citation_precision ?? 0) ? y : x) : null;
+    const bestLocal = M.filter(m => m.local).reduce((x, y) => !x || (y.verified ?? -1) > (x.verified ?? -1) ? y : x, null);
+    const setNote = a.sets ? Object.entries(a.sets).map(([k, v]) => `<b>${esc(k)}</b>: ${esc(v)}`).join(" · ") : "";
     const mchart = M.length ? `<div class="chart"><div class="ct">Which bot model is most accurate?</div>
-      <div class="small muted">Same 38 questions for each model. Bars: answers that passed every check (verified). Hover for details.</div>
-      ${M.map(m => `<div class="vl" title="${esc(m.name)}: verified ${pc(m.verified)}, citations correct ${pc(m.citation_precision)}, key numbers ${pc(m.fact_recall)}, correct 'not found' ${pc(m.correct_not_found)}, median ${m.latency_p50_s ?? "?"} s">
+      <div class="small muted">Bars: answers that passed every check, on the <b>fresh</b> questions the code was never tuned on.
+        Hover for details. ${setNote}</div>
+      ${M.map(m => `<div class="vl" title="${esc(m.name)} (${esc(m.headline_set)} set): verified ${pc(m.verified)}, citations correct ${pc(m.citation_precision)}, key numbers ${pc(m.fact_recall)}, correct 'not found' ${pc(m.correct_not_found)}, wrong 'not found' ${pc(m.false_not_found)}, median ${m.latency_p50_s ?? "?"} s">
         <div class="vlh"><span>${m === best ? "★ " : ""}${esc(m.name)}</span><span><b>${pc(m.verified)}</b></span></div>
-        <div class="track"><span class="bar" style="width:${(m.verified || 0) * 100}%;background:var(--teal)"></span></div></div>`).join("")}
-      <table><tr><th>Model</th><th>Verified</th><th>Citations correct</th><th>Key numbers</th><th>"Not found" right</th><th>Median time</th></tr>
-      ${M.map(m => `<tr><td>${esc(m.name)}</td><td>${pc(m.verified)}</td><td>${pc(m.citation_precision)}</td><td>${pc(m.fact_recall)}</td><td>${pc(m.correct_not_found)}</td><td>${m.latency_p50_s ?? "–"} s</td></tr>`).join("")}</table>
-      ${best ? `<div class="small" style="margin-top:6px"><b>Most accurate: ${esc(best.name)}</b>. Whatever the model, an answer that fails the checks is shown as clause excerpts, never as an answer.</div>` : ""}</div>` : "";
+        <div class="track"><span class="bar" style="width:${(m.verified || 0) * 100}%;background:${m.local ? "var(--pass)" : "var(--teal)"}"></span></div></div>`).join("")}
+      <table><tr><th>Model · set</th><th>Verified</th><th>Citations correct</th><th>Key numbers</th><th>"Not found" right</th><th>Wrong "not found"</th><th>Median time</th></tr>
+      ${M.flatMap(m => m.sets.map(r => `<tr><td>${esc(m.name)}<div class="muted">${esc(r.set)} · ${esc(r.when)}${r.unavailable ? ` · ${r.unavailable} answers rate-limited` : ""}</div></td>
+        <td>${pc(r.verified)}</td><td>${pc(r.citation_precision)}</td><td>${pc(r.fact_recall)}</td><td>${pc(r.correct_not_found)}</td><td>${pc(r.false_not_found)}</td><td>${r.latency_p50_s} s</td></tr>`)).join("")}</table>
+      ${best ? `<div class="small" style="margin-top:6px"><b>Most accurate overall: ${esc(best.name)}</b>${bestLocal ? `; most accurate on this computer (confidential mode): <b>${esc(bestLocal.name)}</b>` : ""}.
+        Whatever the model, an answer that fails the checks is shown as clause excerpts, never as an answer.</div>` : ""}</div>` : "";
     $c("#cpAcc").innerHTML = `<div class="small muted">Measured ${esc(a.measured)}. ${esc(a.how)}</div>` + mchart + a.groups.map(g =>
       `<div class="chart"><div class="ct">${esc(g.name)}</div><div class="small muted">${esc(g.model)}</div>${g.items.map(i => i.value == null
         ? `<div class="small warnline">${esc(i.metric)}</div>`

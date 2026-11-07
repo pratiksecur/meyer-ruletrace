@@ -109,6 +109,16 @@ def _loaded_clause(source: str, retriever):
     """A clause of a loaded text that the source names, if it exists in the index."""
     if retriever is None:
         return None
+    if re.search(r"\bMLC\b|Maritime Labour", source, re.I) or re.search(r"\b(Standard|Guideline)\s+[AB]\d", source):
+        from .retrieval import extract_clause_ids
+
+        roman = {str(i): r for i, r in enumerate(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI",
+                                                    "XII", "XIII", "XIV", "XV", "XVI"]) if i}
+        src = re.sub(r"\bArticle\s+(\d{1,2})\b", lambda m: f"Article {roman.get(m.group(1), m.group(1))}", source)
+        for cid in extract_clause_ids(src):
+            c = retriever.by_uid.get(f"MLC2006::{cid}")
+            if c is not None:
+                return c
     for rx, doc in ((_CFR, "46CFR190"), (_ADA, "36CFR1191AppD")):
         for m in rx.finditer(source):
             c = retriever.by_uid.get(f"{doc}::{m.group(1)}")
