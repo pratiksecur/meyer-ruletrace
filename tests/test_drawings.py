@@ -53,7 +53,7 @@ def test_scanned_or_textless_pdf_rejected(tmp_path):
     c = canvas.Canvas(str(p))
     c.rect(10, 10, 100, 100)
     c.save()
-    with pytest.raises(DesignError, match="no readable text"):
+    with pytest.raises(DesignError, match="no readable text|OCR found almost no text"):  # with or without Tesseract
         design_from_ga_pdf(p)
 
 
@@ -63,3 +63,21 @@ def test_upload_pdf_via_api(client):
     r = client.post(f"/ruletrace/designs/{d['id']}/check", headers=ENG,
                     json={"ship_overrides": {"keel_laid": "2025-06-01"}}).json()
     assert r["counts"]["fail"] == 5 and r["interpretation"]["found"]["cabin"] == 12
+
+
+def test_dimension_tables_from_other_yards():
+    """Layouts seen on real GA drawings: value column apart from the labels, OCR misreads (0 for O, lost 'F')."""
+    from ruletrace.ga_import import _dims_from_text, _particulars_table
+    text = ("MAIN DIMENSIONS:\nLENGTH 0.A 77,50 m\nLENGTH P.P. 68,40 m\nBEAM 16,40/18,60 m\nDEPTH TO 1.DECK 6,30 m\n"
+            "DEPTH TO 2.DECK 9,10 m\n\"RAME SPACING 600 mm\nACCOMMODATION FOR 45 PERSONS")
+    found, depth = _dims_from_text(text)
+    assert found == {"loa": 77.5, "lbp": 68.4, "breadth": 16.4, "spacing": 600.0}
+    assert depth == {"1 DECK": 6.3, "2 DECK": 9.1}
+
+    def w(text, x, top, ocr=True):
+        return {"text": text, "x0": x, "x1": x + 6 * len(text), "top": top, "bottom": top + 8, "size": 10.4, "ocr": ocr}
+    # OCR lost the deck name of one row: values must still pair with their own rows, not shift by one
+    words = [w("DEPTH", 0, 100), w("TO", 40, 100), w("1.DECK", 60, 100), w("6,30", 300, 100),
+             w("DEPTH", 0, 111), w("TO", 40, 111), w("9,10", 300, 111),
+             w("DEPTH", 0, 122), w("TO", 40, 122), w("3.DECK", 60, 122), w("11,80", 300, 122)]
+    assert _particulars_table(words)[1] == {"1 DECK": 6.3, "3 DECK": 11.8}

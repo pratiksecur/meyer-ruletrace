@@ -158,18 +158,6 @@ from the ship's breadth), `actual_expr` (a value computed from the geometry), `f
 Applicability keys: `ship_types`, `passenger_ship`, `passengers_more_than`, `keel_laid_on_or_after`,
 `length_m_at_least`, `gross_tonnage_at_least`, `operating_areas_any`.
 
-## AI actions (local model, verified by the rule engine)
-
-**Fix suggestions** `POST /ruletrace/designs/{id}/fixes` (`ruletrace/llm_actions.py`)
-- What: for each failing finding (default 5), proposes a new value for the property the rule tests, e.g. stair `clear_width` 850 mm → 900 mm.
-- Guard: a proposal is applied to a copy of the design and re-checked; it is kept only if that finding passes **and nothing else newly fails**. Wrong element, wrong property or a value without a unit is rejected. A rule-based fallback (the required value itself) works with no model.
-- Limit: only single-property fixes. Checks computed from geometry (zone length, double-bottom height) or from several parts get no proposal. Nothing is written to the design until an engineer applies it.
-
-**Plain-language what-if** `POST /ruletrace/designs/{id}/whatif` with `{"text": "keel laid in 2027 and we also operate in the Baltic"}`
-- What: turns the question into ship-profile changes, re-checks, and returns what newly fails, newly passes and which rules switch on or off.
-- Guard: only the allowed profile fields; operating areas from the known list and named in the question; keel date ISO and its year in the question; numbers in range and present in the question. Anything unclear is refused with HTTP 422, never guessed.
-- Limit: changes the ship profile only, not the design itself. Measure both with `python scripts/evaluate_llm.py` (with Ollama running).
-
 ## Accuracy
 
 ```bash
@@ -180,12 +168,37 @@ samples are synthetic and were labelled by the same team that wrote the rules, s
 engine does what the rules say. It is not proof that the rules are complete. Rules marked `verified: false`
 (the escape door/corridor widths) need checking against the current FSS Code text before use.
 
+### Real drawings
+
+```bash
+python scripts/real_drawings.py dana.pdf atlantic.pdf gosars.pdf
+```
+Reads the three real, public GA drawings linked in Meyer's brief (from three different design offices) and
+compares what RuleTrace read with what each drawing states. The stated values were typed in by hand into
+`evaluation/real_drawings.json`; the drawings are not stored here (download them from the links in that file).
+
+| Drawing | How it is read | Read in | Stated values read correctly |
+| --- | --- | --- | --- |
+| DTU Dana V | PDF text layer | 1 s | 12 of 12 (dimensions, scale, persons, main-deck height, cabins per deck, hospital) |
+| 60 m fishery research vessel (Atlantic Shipdesign) | PDF text layer, two-column dimension table | 0.5 s | 8 of 8 (dimensions, scale, three deck heights) |
+| G.O. Sars | no text layer: OCR, plus a sharper second pass over the dimensions table | 85 s | 10 of 10 (dimensions, scale, persons, four deck heights) |
+
+Be honest about it too: the reader was improved on these same drawings (in the morning it could only read
+Dana; the other two were rejected), so the fair next test is a drawing it has never seen. Room names on the
+Atlantic and G.O. Sars drawings are drawn as lines rather than text, so their cabins are not read yet and
+room rules report "can't check" rather than guessing. The G.O. Sars sheet measures 1:215 against a stated
+1:150, which RuleTrace reports as "plotted one paper size smaller".
+
+Optional, for drawings without a text layer (like G.O. Sars): install Tesseract OCR and make sure `tesseract`
+is on the PATH. Windows: `winget install UB-Mannheim.TesseractOCR`, then add `C:\Program Files\Tesseract-OCR`
+to PATH. Linux: `apt install tesseract-ocr`. Without it, such drawings are rejected with a clear message.
+
 ## Limits (say these if asked)
 
 - Rule texts are summaries and quotes from public sources. Class rules (e.g. DNV) and full IMO texts must be checked against the official editions before real use.
 - Hull and deck rules (collision bulkhead, double bottom, Load Line openings and rails) are the SOLAS / ICLL requirements that class rules repeat. The collision-bulkhead check does not yet model the bulbous-bow reference point (SOLAS II-1/12.2). We could not get DNV's own rule text at the event, so no rule cites a DNV paragraph; add one once access is available.
 - The rule pack is a focused starter set, not full coverage. Each rule is small to add and test.
-- GA reading uses text labels and their positions. Room outlines (the drawn lines) are not traced yet, so footprints are approximate, and dimension lines are not yet used. Vector PDFs only.
+- GA reading uses text labels and their positions. Room outlines (the drawn lines) are not traced yet, so footprints are approximate, and dimension lines are not yet used. Drawings without a text layer are read with OCR (Tesseract), which is slower and reads dimensions and labels, not room outlines.
 - PVAG were published by the US Access Board as proposed guidelines. Confirm their status for each project.
 
 ## Data and IP
