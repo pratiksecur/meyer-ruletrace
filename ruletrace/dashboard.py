@@ -60,7 +60,8 @@ def _review(store: Path, design_id: str, counts: dict) -> dict:
     stage = so.get("stage") or ("not started" if not reviewed else "in review")
     label = {"approved": f"Approved by {so.get('approved_by')}", "prepared": f"Prepared by {so.get('prepared_by')}, awaiting approval",
              "rejected": f"Sent back by {so.get('rejected_by')}"}.get(stage, f"{reviewed} of {open_n} findings reviewed")
-    return {"stage": stage, "label": label, "reviewed": reviewed, "open": open_n}
+    return {"stage": stage, "label": label, "reviewed": reviewed, "open": open_n, "prepared_by": so.get("prepared_by"),
+            "approved_by": so.get("approved_by"), "rejected_by": so.get("rejected_by")}
 
 
 def readiness(counts: dict) -> tuple[str, str]:

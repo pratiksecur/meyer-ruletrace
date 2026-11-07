@@ -23,6 +23,27 @@ AI_ACTIONS = {
 }
 
 
+APPROVAL_STAGES = (("not started", "Not started"), ("in review", "Engineer reviewing"),
+                   ("prepared", "Awaiting approval"), ("approved", "Approved"), ("rejected", "Sent back"))
+
+
+def approvals_of(designs: list[dict]) -> dict:
+    """Human sign-off progress across designs: how many are at each stage, and which are waiting for an approver.
+    Each design carries ``review`` (see dashboard._review); a design with none counts as not started."""
+    stages = {k: 0 for k, _ in APPROVAL_STAGES}
+    awaiting = []
+    for d in designs:
+        rv = d.get("review") or {}
+        stage = rv.get("stage") if rv.get("stage") in stages else "not started"
+        stages[stage] += 1
+        if stage == "prepared":
+            awaiting.append({"design_id": d.get("design_id"), "ship": d.get("ship") or d.get("title"), "title": d.get("title"),
+                             "prepared_by": rv.get("prepared_by"), "open": rv.get("open", 0)})
+    total = len(designs)
+    return {"total": total, "approved": stages["approved"], "pct_approved": _pct(stages["approved"], total),
+            "stages": [{"stage": k, "label": lbl, "count": stages[k]} for k, lbl in APPROVAL_STAGES], "awaiting": awaiting}
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
@@ -43,6 +64,10 @@ def rating(designs: int, major: int, minor: int, warn: int, unknown: int) -> dic
     if parts:
         return {"level": "watch", "label": "WATCH", "reason": ", ".join(parts), "rule": RATING_RULE}
     return {"level": "clear", "label": "CLEAR", "reason": "No issues found by the checked rules", "rule": RATING_RULE}
+
+
+def approvals_pending(designs: list[dict]) -> int:
+    return sum(1 for d in designs if (d.get("review") or {}).get("stage") == "prepared")
 
 
 def _pct(part: int, whole: int):
@@ -132,6 +157,8 @@ def build_posture(summary: dict, rules: list, entries: list[dict]) -> dict:
         signals.append({"level": "warn", "text": f"{_plural(minor, 'minor issue')} open"})
     if counts["unknown"]:
         signals.append({"level": "warn", "text": f"{_plural(counts['unknown'], 'check')} could not be decided because the design lacks a value"})
+    if approvals_pending(designs):
+        signals.append({"level": "warn", "text": f"{_plural(approvals_pending(designs), 'design')} waiting for an approver's signature"})
     if unverified:
         signals.append({"level": "warn", "text": f"{len(unverified)} of {len(rules)} rules are not yet verified against the official text"})
     if chain.get("ok") is False:
@@ -139,8 +166,9 @@ def build_posture(summary: dict, rules: list, entries: list[dict]) -> dict:
     elif chain:
         signals.append({"level": "good", "text": f"Check history intact: all {chain.get('entries', 0)} records unchanged"})
 
+    approvals = approvals_of(designs)
     return {"rating": rating(len(designs), major, minor, counts["warn"], counts["unknown"]),
-            "outcomes": counts,
+            "outcomes": counts, "approvals": approvals,
             "readiness": {k: sum(1 for r in ship_rows if r["readiness"] == k) for k in ("ready", "review", "fix", "info")},
             "kpis": {"designs": len(designs), "checks_run": (summary.get("totals") or {}).get("checks_run", 0),
                      "major_open": major, "minor_open": minor, "warn_open": counts["warn"], "unknown_open": counts["unknown"],

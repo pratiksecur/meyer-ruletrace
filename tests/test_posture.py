@@ -166,3 +166,35 @@ def test_only_administrators_get_the_administration_page(client, monkeypatch):
         assert client.get("/ruletrace/admin", headers=who).status_code == 403
     assert client.get("/ruletrace/summary", headers=ENG).json()["admin"] is False
     assert client.get("/ruletrace/summary", headers=CISO).json()["admin"] is False
+
+
+# ---- human approval progress ----
+
+def _rv(stage, **kw):
+    return {"stage": stage, "open": 3, "reviewed": 3, **kw}
+
+
+def test_approval_progress_counts_stages_and_lists_who_is_waiting():
+    from ruletrace.posture import approvals_of
+    ds = [{**design(1, {"pass": 1, "fail": 0, "warn": 0, "unknown": 0}), "review": _rv("approved", approved_by="aino")},
+          {**design(2, {"pass": 1, "fail": 1, "warn": 0, "unknown": 0}), "review": _rv("prepared", prepared_by="mikko")},
+          {**design(3, {"pass": 1, "fail": 1, "warn": 0, "unknown": 0}), "review": _rv("in review")},
+          design(4, {"pass": 1, "fail": 0, "warn": 0, "unknown": 0})]                       # no review record = not started
+    a = approvals_of(ds)
+    assert a["total"] == 4 and a["approved"] == 1 and a["pct_approved"] == 25
+    assert {s["stage"]: s["count"] for s in a["stages"]} == {"not started": 1, "in review": 1, "prepared": 1, "approved": 1, "rejected": 0}
+    assert [w["prepared_by"] for w in a["awaiting"]] == ["mikko"] and a["awaiting"][0]["ship"] == "Ship 2"
+    p = build_posture(summary(ds, 0, 0), [], [])
+    assert p["approvals"] == a and any("1 design waiting for an approver" in s["text"] for s in p["signals"])
+    assert approvals_of([])["total"] == 0 and approvals_of([])["awaiting"] == []
+
+
+def test_approvals_reach_engineers_and_the_ciso_but_not_executives(client):
+    did = client.post("/ruletrace/designs/sample/demo_research_vessel", headers=ENG).json()["id"]
+    client.post(f"/ruletrace/designs/{did}/check", headers=ENG, json={})
+    for who in (ENG, CISO):
+        a = client.get("/ruletrace/summary", headers=who).json()["approvals"]
+        assert a["total"] == 1 and a["approved"] == 0
+    assert client.get("/ruletrace/posture", headers=CISO).json()["approvals"]["total"] == 1
+    ceo = client.get("/ruletrace/summary", headers=CEO).json()
+    assert "approvals" not in ceo and "approved" in ceo["totals"]          # executives keep only the headline count

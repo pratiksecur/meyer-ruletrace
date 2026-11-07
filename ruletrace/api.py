@@ -39,7 +39,7 @@ from .admin import build_admin
 from .dashboard import activity_entries, build_summary, checked_entries
 from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
-from .posture import build_posture
+from .posture import approvals_of, build_posture
 
 STATIC = Path(__file__).parent / "static"
 SAMPLES = Path(__file__).parent / "samples"
@@ -146,6 +146,8 @@ def make_router(app) -> APIRouter:
         out["view"] = view
         out["admin"] = is_admin(who) and view == "engineer"
         out["me"] = {"name": who.name, "roles": list(who.roles)}
+        if view in ("engineer", "compliance"):   # executives only get the headline count in totals
+            out["approvals"] = approvals_of(out["designs"])
         if view != "engineer":  # compliance and executive views get the plain summary, not element-level findings or hashes
             for d in out["designs"]:
                 d.pop("fails", None)

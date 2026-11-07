@@ -131,6 +131,7 @@ function engineerView(){
     <div class="kpi"><b class="c-unknown">${t.open_unknown}</b><span>can't check yet (the design is missing a value)</span></div>
     <div class="kpi"><b class="c-warn">${t.open_warn}</b><span>worth a second look</span></div>
   </div>
+  ${approvalCard(S.approvals)}
   <div class="card"><h2>Designs</h2>
     <table><thead><tr><th>Design</th><th>Result</th><th class="num">Problems</th><th>Engineer review</th><th>Checked</th><th></th></tr></thead>
     <tbody>${S.designs.map((d,i) => `
@@ -260,6 +261,17 @@ function lineChart(points, label){   // points: {y, tip}
   const dots = points.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.y)}" r="3.5" style="fill:var(--fail)"><title>${esc(p.tip)}</title></circle>${i % every === 0 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">#${i + 1}</text>` : ""}`).join("");
   return `<svg class="ch" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}<path d="${area}" style="fill:var(--fail);opacity:.10"/><path d="${line}" fill="none" style="stroke:var(--fail)" stroke-width="2"/>${dots}</svg>`;
 }
+const STAGE_COL = {"not started": "var(--unknown)", "in review": "#e6b84d", "prepared": "#3b6fd4", "approved": "var(--pass)", "rejected": "var(--fail)"};
+function approvalCard(a){
+  if (!a || !a.total) return `<div class="card"><h2>Human approval</h2><div class="muted">No design has been checked yet.</div></div>`;
+  const chart = donut(a.stages.map(g => ({label: g.label, value: g.count, color: STAGE_COL[g.stage]})), `${a.approved}/${a.total}`, "approved");
+  const wait = a.awaiting.length ? `<h2 style="margin-top:16px">Waiting for an approver (${a.awaiting.length})</h2>${a.awaiting.map(w =>
+      `<div class="ship"><b style="font-weight:500">${esc(w.ship)}<div class="small muted" style="font-weight:400">${esc(w.title)} · prepared by ${esc(w.prepared_by || "an engineer")}</div></b>
+       <a class="small" href="/ruletrace#design=${encodeURIComponent(w.design_id)}">Open to review</a></div>`).join("")}`
+    : `<div class="small muted" style="margin-top:12px">Nothing is waiting for an approver.</div>`;
+  return `<div class="card"><h2>Human approval</h2>${chart}${wait}
+    <div class="small muted" style="margin-top:10px">Nothing counts as approved until a second person has signed it off.</div></div>`;
+}
 function complianceView(){
   const k = P.kpis, r = P.rating, ai = P.ai, rp = P.rule_pack, c = P.chain || {};
   const pct = v => v == null ? "–" : v + "%";
@@ -322,11 +334,14 @@ function complianceView(){
     <div class="card"><h2>Result of every check</h2>${outcomeChart}</div>
   </div>
   <div class="card"><h2>What needs your attention</h2>${sig}</div>
+  <div class="grid g2" style="align-items:start">
+    ${approvalCard(P.approvals)}
+    <div class="card"><h2>Design readiness</h2>${readyChart}</div>
+  </div>
   <div class="card"><h2>All designs checked</h2>${ships}</div>
-  <div class="grid g3" style="align-items:start">
+  <div class="grid g2" style="align-items:start">
     <div class="card"><h2>Where to focus first</h2>${focus}</div>
     <div class="card"><h2>Issues that recur across designs</h2>${rec}</div>
-    <div class="card"><h2>Design readiness</h2>${readyChart}</div>
   </div>
   <div class="grid g2" style="align-items:start">
     <div class="card"><h2>Open issues per design</h2>${perDesign}</div>
