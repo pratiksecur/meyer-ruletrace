@@ -39,6 +39,7 @@ Also built in:
 - `ruletrace/ga_import.py`: GA drawing reader (PDFium): scale from frame numbers, deck plans and heights, room labels, principal particulars, title-block statements
 - `ruletrace/ifc_import.py`: IFC reader (ifcopenshell): class mapping, property sets, world-space bounding boxes
 - `ruletrace/dashboard.py` + `static/dashboard.html`: engineer and executive dashboard, built from the recorded design checks
+- `ruletrace/rulesets.py` + `rulesets_api.py` + `static/rulesets.html`: read a regulation document into draft rules and analyse them against the designs and the current rules
 - `ruletrace/engine.py`: applicability, safe expressions, checks, findings
 - `ruletrace/rules/*.yaml`: the rule pack (33 rules: SOLAS/FSS fire and escape, SOLAS II-1 collision bulkhead and double bottom, Load Line deck openings and guard rails, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
@@ -135,6 +136,29 @@ planted problems is: `ruletrace/samples/demo_ga_drawing.pdf` (`scripts/make_ga_s
 ```
 `box` = [x, y, z, length, width, height] in metres (x forward from the aft perpendicular, y to starboard from the centreline, z up from the baseline).
 Operating areas: `us_ports`, `north_american_eca`, `us_caribbean_eca`, `baltic_sea`, `north_sea`, `mediterranean`, `canadian_arctic`.
+
+## New rule sets: will they work?
+
+Open **http://localhost:8001/ruletrace/rulesets/page** (or *New rule sets* in the header) and upload a company,
+owner, class or flag requirement document: PDF, Word (.docx), text, Markdown, HTML, or RuleTrace YAML. Try
+*the sample owner's standard* (`ruletrace/samples/rules/demo_owner_spec.md`, with deliberate flaws).
+
+1. Every "shall / must / not less than" sentence with a measurable value about a part RuleTrace models
+   (stairs, corridors, doors, ramps, ventilators, air pipes, guard rails, cabins, double bottom, main vertical
+   zones, collision bulkhead) becomes a **draft rule**, quoted word for word and marked `verified: false`.
+   Sentences it can't turn into a check are listed for an engineer with the reason (no metric value, a part
+   not modelled yet, ...). With *AI helper* ticked and Ollama running, those sentences are also offered to the
+   local model, under the same checks as `llm_assist.draft_rule`.
+2. The draft rules are run on the designs in RuleTrace (or the samples, if none are loaded) next to the current
+   rule pack, and each gets a verdict: **works**, **conflicts** (can't be met together with a current or another
+   new rule), **weaker than a current rule** (it would pass parts the current rule fails, listed), **stricter**
+   (the new issues it raises, listed), **duplicate**, **can't be checked** (the designs lack the value) or
+   **not tested** (no design has that kind of part).
+3. Nothing joins the live rule pack automatically: download the draft YAML, fix what was flagged, check it
+   against the official text and add a test case. Each analysis is written to the audit chain.
+
+The comparison is exact for fixed values (at least / at most / slope); rules whose limit depends on the
+ship (formulas) are run and reported, but not compared value by value.
 
 ## Adding a rule
 

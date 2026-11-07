@@ -33,9 +33,8 @@ from vartija_core import audit
 import yaml
 from vartija_core.api import Principal, current_principal
 
-from .checking import OverrideError, check_record
 from .dashboard import build_summary, checked_entries
-from .engine import RuleError, load_rules
+from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict, load_design
 
 STATIC = Path(__file__).parent / "static"
@@ -219,11 +218,18 @@ def make_router(app) -> APIRouter:
     @router.post("/designs/{design_id}/check")
     def check(design_id: str, body: CheckIn | None = None, who: Principal = Depends(engineer)) -> dict:
         rec = json.loads(_path(design_id).read_text(encoding="utf-8"))
+        d = rec["design"]
         overrides = (body.ship_overrides if body else {}) or {}
+        allowed = {"operating_areas", "keel_laid", "passengers", "ship_type", "length_m", "breadth_m",
+                   "gross_tonnage", "flag"}
+        bad = set(overrides) - allowed
+        if bad:
+            raise HTTPException(400, f"cannot override {sorted(bad)}")
+        d["ship"] = {**d["ship"], **overrides}
         try:
-            design, rs, result = check_record(rec, overrides)
-        except OverrideError as exc:
-            raise HTTPException(400, str(exc)) from exc
+            design = design_from_dict(d, source_file=rec["filename"])
+            rs = load_rules()
+            result = check_design(design, rs)
         except (DesignError, RuleError) as exc:
             raise HTTPException(400, str(exc)) from exc
         result.update(design_id=design_id, filename=rec["filename"], design_sha256=rec["sha256"],
@@ -240,5 +246,8 @@ def make_router(app) -> APIRouter:
 
     from .llm_api import add_llm_routes  # local-LLM helpers (explain, draft rule, ask)
     add_llm_routes(app, router, engineer, _path)
+
+    from .rulesets_api import add_ruleset_routes  # proposed rule sets: read a regulation document, analyse it
+    add_ruleset_routes(app, router, engineer, store)
 
     return router
