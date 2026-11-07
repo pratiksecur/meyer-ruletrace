@@ -99,8 +99,12 @@ def test_drawing_reading_becomes_a_ruletrace_design(indexed, monkeypatch):
     r = indexed.post("/ruletrace/copilot/read", headers=ENG, data={"page": "1"},
                      files={"file": ("scan.pdf", pdf.read_bytes(), "application/pdf")}).json()
     assert r["kind"] == "drawing" and r["summary"] == {"cabins": 2, "berths_confirmed": 2, "hospital": True}
+    no = indexed.post("/ruletrace/copilot/design", headers=ENG,
+                      json={"readings_id": r["readings_id"], "ship": {"name": "Test", "length_m": 60}})
+    assert no.status_code == 428  # an engineer must approve the readings first
     d = indexed.post("/ruletrace/copilot/design", headers=ENG,
-                     json={"readings_id": r["readings_id"], "ship": {"name": "Test", "length_m": 60}}).json()
+                     json={"readings_id": r["readings_id"], "ship": {"name": "Test", "length_m": 60},
+                           "approved": True, "note": "checked against the sheet"}).json()
     assert d["elements"] == 3  # the unconfirmed cabin is left out
     design = indexed.get(f"/ruletrace/designs/{d['id']}", headers=ENG).json()["design"]
     cabins = {e["name"]: e for e in design["elements"] if e["type"] == "cabin"}
@@ -109,7 +113,7 @@ def test_drawing_reading_becomes_a_ruletrace_design(indexed, monkeypatch):
     res = indexed.post(f"/ruletrace/designs/{d['id']}/check", headers=ENG).json()
     assert res["counts"] and indexed.get("/audit/verify", headers=ENG).json()["ok"]
     # with the full ship profile the rule engine checks the Gemini-read arrangement itself
-    full = indexed.post("/ruletrace/copilot/design", headers=ENG, json={"readings_id": r["readings_id"], "ship": {
+    full = indexed.post("/ruletrace/copilot/design", headers=ENG, json={"readings_id": r["readings_id"], "approved": True, "ship": {
         "name": "Test", "persons_total": 4, "keel_laid": "2026-01-15", "complete_arrangement": True}}).json()
     res = indexed.post(f"/ruletrace/designs/{full['id']}/check", headers=ENG).json()
     status = {f["rule_id"]: f["status"] for f in res["findings"]}
@@ -199,5 +203,54 @@ def test_too_few_rooms_make_no_design(indexed, monkeypatch):
     pdf = Path(__file__).parents[1] / "ruletrace" / "samples" / "demo_ga_drawing.pdf"
     r = indexed.post("/ruletrace/copilot/read", headers=ENG, data={"page": "1"},
                      files={"file": ("ga.pdf", pdf.read_bytes(), "application/pdf")}).json()
-    d = indexed.post("/ruletrace/copilot/design", headers=ENG, json={"readings_id": r["readings_id"], "ship": {}})
+    d = indexed.post("/ruletrace/copilot/design", headers=ENG,
+                     json={"readings_id": r["readings_id"], "ship": {}, "approved": True})
     assert d.status_code == 422 and "too few" in d.json()["detail"]
+
+
+def test_bot_never_uses_gemini(monkeypatch):
+    from ruletrace.copilot_api import provider
+
+    monkeypatch.delenv("COPILOT_LLM_PROVIDER", raising=False)
+    assert provider() == "groq,ollama"
+    monkeypatch.setenv("COPILOT_LLM_PROVIDER", "gemini,groq")
+    assert provider() == "groq"
+
+
+def test_question_outside_the_rules_gets_a_labelled_general_answer(indexed, monkeypatch):
+    import rulemate.llm
+
+    monkeypatch.setattr(rulemate.llm, "get_llm", lambda spec=None: FakeLLM("NOT_FOUND"))
+    import rulemate.general
+
+    real = rulemate.general.general_answer
+    monkeypatch.setattr(rulemate.general, "general_answer",
+                        lambda q, llm=None: real(q, FakeLLM("SOLAS covers safety; MLC covers crew.")))
+    a = indexed.post("/ruletrace/copilot/ask", headers=ENG,
+                     json={"question": "What is the difference between SOLAS and MLC for a cruise ship?"}).json()
+    assert a["status"] == "not_found" and a["general"]["ok"]
+    assert "not from the loaded rules" in a["general"]["label"] and "SOLAS" in a["general"]["text"]
+    assert not a["citations"]  # a general answer never cites a clause
+
+
+def test_review_is_recorded_and_listed(indexed):
+    r = indexed.post("/ruletrace/copilot/review", headers=ENG, json={
+        "kind": "verdict", "ref": "D03 berth clear height 30 in", "decision": "approve", "note": "berths not stacked"})
+    assert r.status_code == 200 and r.json()["by"]
+    assert indexed.post("/ruletrace/copilot/review", headers=ENG, json={
+        "kind": "anything", "ref": "x", "decision": "approve"}).status_code == 422
+    lst = indexed.get("/ruletrace/copilot/reviews", headers=ENG).json()
+    assert lst[0]["ref"] == "D03 berth clear height 30 in" and lst[0]["decision"] == "approve"
+    assert indexed.get("/audit/verify", headers=ENG).json()["ok"]
+    assert indexed.post("/ruletrace/copilot/review", headers=CEO, json={
+        "kind": "verdict", "ref": "x", "decision": "approve"}).status_code == 403
+
+
+def test_accuracy_and_chart_numbers(indexed):
+    acc = indexed.get("/ruletrace/copilot/accuracy", headers=ENG).json()
+    assert acc["groups"] and acc["caveats"]
+    r = indexed.get("/ruletrace/copilot/example.csv", headers=ENG).text
+    out = indexed.post("/ruletrace/copilot/check/csv", headers=ENG,
+                       files={"file": ("ex.csv", r.encode(), "text/csv")}).json()
+    d = next(x["deciding"] for x in out["results"] if x["deciding"])
+    assert {"limit_value", "value_in_limit_unit", "unit", "comparator"} <= set(d)

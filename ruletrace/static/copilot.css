@@ -44,3 +44,22 @@ header .cpbtn:hover{background:#2a82c2}
 .cp .short .lab{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#0b4f7c;margin-bottom:3px}
 .cp .short ul{margin:4px 0 0;padding-left:18px}.cp .short li{margin:2px 0}
 .cp details summary{font-size:12.5px}
+.cp .tabs .opt{font-size:9.5px;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 4px;margin-left:2px}
+.cp .badge2.general{background:#6a5acd}
+.cp .ans.gen{border-color:#c9c2ef;background:#faf9ff}
+.cp .warnline{font-size:12px;color:#7a4b00;background:#fff6e5;border-radius:6px;padding:4px 7px;margin:4px 0}
+.cp .rv{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:7px;padding-top:6px;border-top:1px dashed var(--line);cursor:default}
+.cp .rv .rvnote{flex:1;min-width:90px;font-size:12px;padding:3px 6px}.cp .rv button{font-size:12px;padding:2px 9px}
+.cp .rv button[data-dec=approve]{border-color:var(--pass);color:var(--pass)}.cp .rv button[data-dec=reject]{border-color:var(--fail);color:var(--fail)}
+.cp .rej{color:var(--fail);font-weight:600}
+.cp .chart{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:10px;background:#fff}
+.cp .chart .ct{font-weight:600;font-size:12.5px;margin-bottom:4px}
+.cp .stack{display:flex;gap:2px;height:12px;margin-top:4px}.cp .stack span:first-child{border-radius:4px 0 0 4px}.cp .stack span:last-child{border-radius:0 4px 4px 0}
+.cp .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;margin-top:5px;color:var(--ink)}
+.cp .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.cp .vl{margin-top:7px}.cp .vlh{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--ink)}
+.cp .vlh span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cp .vlh span:last-child{white-space:nowrap;color:var(--muted)}
+.cp .track{position:relative;height:8px;background:var(--bg);border-radius:4px;margin-top:3px}
+.cp .track .bar{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;min-width:2px}
+.cp .track .lim{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);transform:translateX(-1px)}
+.cp .appr{display:flex;flex-direction:column;gap:3px;font-size:12.5px;margin-top:6px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 8px}

@@ -1,0 +1,39 @@
+{
+  "measured": "2026-11-07",
+  "how": "eval/run.py in the RuleMate repo: 38 questions (32 answerable, 6 not answerable from the texts), three designs with known verdicts, planted defects, and two real GA drawings with hand-counted truth.",
+  "groups": [
+    {"name": "Answers from the rule texts (Ask)", "model": "groq:openai/gpt-oss-120b",
+     "items": [
+       {"metric": "Right clause found (in the top 5)", "value": 1.00, "n": 32},
+       {"metric": "Answers that passed every check (verified)", "value": 0.91, "n": 32, "note": "the rest are shown as clause excerpts, not as an answer"},
+       {"metric": "Citations that really support the sentence", "value": 0.96, "n": 50},
+       {"metric": "Key numbers present in the answer", "value": 0.89, "n": 28},
+       {"metric": "Questions outside the texts correctly answered 'not found'", "value": 1.00, "n": 6}
+     ]},
+    {"name": "Compliance check (Check values)", "model": "no model: computed in code",
+     "items": [
+       {"metric": "Verdicts correct, research vessel (46 CFR 190)", "value": 1.00, "n": 14},
+       {"metric": "Verdicts correct, accessible stateroom (ADA)", "value": 1.00, "n": 9},
+       {"metric": "Verdicts correct, cruise sample (synthetic rules)", "value": 1.00, "n": 15},
+       {"metric": "Planted defects caught", "value": 1.00, "n": 19},
+       {"metric": "Value exactly at the limit wrongly failed", "value": 0.00, "n": 19, "lower_is_better": true}
+     ]},
+    {"name": "Reading drawings (optional Gemini)", "model": "gemini flash (free tier), confirmed by local OCR",
+     "items": [
+       {"metric": "NOAA GA: berth labels found by OCR", "value": 1.00, "n": 34},
+       {"metric": "NOAA GA: room and berth count exact by Gemini", "value": 0.97, "n": 34},
+       {"metric": "NOAA GA: Gemini readings confirmed on the sheet", "value": 1.00, "n": 34},
+       {"metric": "RCRV GA: stair flights measured", "value": 1.00, "n": 3}
+     ]},
+    {"name": "General answers (questions outside the rule texts)", "model": "Groq / Ollama",
+     "items": [
+       {"metric": "Not measured: general knowledge, not checked against any rule text", "value": null, "n": 0}
+     ]}
+  ],
+  "caveats": [
+    "The questions and example designs were written by the team, and thresholds were tuned on them: expect lower numbers on new real data.",
+    "Only two real drawings were scored; drawings without printed room names give fewer readings.",
+    "General answers are not checked at all. Treat them as a starting point and confirm in the governing rules.",
+    "Every PASS / FAIL is computed in code from the clause text; a model never decides it."
+  ]
+}

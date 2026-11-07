@@ -57,14 +57,22 @@ Also built in:
 ## RuleMate Copilot: ask the regulations, read drawings with Gemini
 
 A side panel in the 3D viewer (**✦ Copilot** in the header, or **Ask the regulations** on any finding). It adds
-four tools the rule pack does not have on its own, behind the same login, roles and audit chain:
+tools the rule pack does not have on its own, behind the same login, roles and audit chain:
 
 | Tab | What it does | How it stays trustworthy |
 | --- | --- | --- |
-| **Ask the regulations** | Answers questions from the **full official texts** (46 CFR Part 190 for research vessels and the ADA/ABA technical requirements, 825 clauses, public domain, in `ruletrace/copilot_rules/`), with clause citations you can click open. | Every sentence must cite a retrieved clause that supports it; every number, unit and quote must be in that clause; otherwise the clause excerpts are shown, or "not found in the rules". Checked in code, not by the model. |
+| **Ask the regulations** | Answers questions from the **full official texts** (46 CFR Part 190 for research vessels and the ADA/ABA technical requirements, 825 clauses, public domain, in `ruletrace/copilot_rules/`), with clause citations you can click open. | Every sentence must cite a retrieved clause that supports it; every number, unit and quote must be in that clause; otherwise the clause excerpts are shown, or "not found in the rules". Checked in code, not by the model. A question the texts do not cover (e.g. "difference between SOLAS and MLC") also gets a **general answer**, labelled *general knowledge, not from the loaded rules, not verified*, with no citations and no verdict. The bot uses **Groq and Ollama only**. |
 | **Check values** | Design values from a form, a **CSV**, a **picture** or a **drawing page (PDF)**: Gemini reads the written dimensions, code confirms each on the page and measures stair angles from a PDF's vector lines; then each value (`30`, `1500 mm`, `2'-6"`) against limits extracted from the full texts: PASS / FAIL / NEEDS REVIEW with the deciding limit and clause; example CSV and download. | Limits are validated against the clause text; units converted with pint; the verdict is computed in code. A limit with a condition code cannot confirm gives NEEDS REVIEW. A limit only applies to a value of the same order of magnitude that shares a specific word with it, so a ship's 60 m length is never "checked" against a berth width: unmatched values are NEEDS REVIEW, "no matching limit". |
 | **Browse** | The full texts as an outline per document, search, and every clause with its parent, sub-clauses, references and "referred to by"; *Ask about this clause*. | Verbatim official text (eCFR), split by its own numbering. |
-| **Read with Gemini** | A **picture** (screenshot from the design tool, sketch, photo with dimensions) or a **drawing page** (PDF, including **scanned** drawings, which the GA reader rejects). Pictures: every written value is checked against the full texts (e.g. a 1500 mm turning circle = 59.06 in, ADA 304.3.1 needs 60 in: FAIL). Drawings: the cabins and hospital become a RuleTrace design, checked by the rule engine and shown in 3D. | Gemini only proposes. A reading is used only when local OCR finds its label, number or value on the image at the position Gemini reports; berths only when the drawing states them ("CREW DOUBLE", "SCIENTIST (2)"). Everything else is shown as "Gemini only" and not used. PASS/FAIL comes from code. |
+| **Accuracy** | Measured accuracy of every part (answers, checks, drawing reading), with sample sizes and caveats, and the log of engineer decisions. | Numbers from `eval/run.py` (RuleMate repo), stored in `ruletrace/copilot_rules/accuracy.json`; general answers are shown as *not measured*. |
+| **Gemini (optional)** | A **picture** (screenshot from the design tool, sketch, photo with dimensions) or a **drawing page** (PDF, including **scanned** drawings, which the GA reader rejects). Pictures: every written value is checked against the full texts (e.g. a 1500 mm turning circle = 59.06 in, ADA 304.3.1 needs 60 in: FAIL). Drawings: the cabins and hospital become a RuleTrace design, checked by the rule engine and shown in 3D. | Gemini only proposes. A reading is used only when local OCR finds its label, number or value on the image at the position Gemini reports; berths only when the drawing states them ("CREW DOUBLE", "SCIENTIST (2)"). Everything else is shown as "Gemini only" and not used. PASS/FAIL comes from code. |
+
+**Human approval.** Wherever code cannot settle something alone, an engineer decides and the decision is written
+to the audit chain (`copilot.reviewed`, `copilot.approved`): NEEDS REVIEW verdicts (*does the condition hold?*),
+values read by Gemini, general answers, and turning a drawing into a RuleTrace design (the engineer unticks wrong
+rooms and confirms; without `approved=true` the API refuses with 428).
+**Comparison charts.** Check results show a verdict breakdown and *design value vs rule limit* bars (same unit, the
+limit as a line); readings show *read by Gemini vs confirmed in code*; the Accuracy tab shows each metric as a bar.
 
 Tested on the brief's public drawings (not in this repo, owners' notices): the scanned 1990 NOAA research-ship
 study, second deck: 34 of 34 cabins and the hospital read and confirmed; the rule engine then passes
@@ -74,15 +82,15 @@ RCRV design summary.
 
 ```bash
 python -m pip install -e ".[copilot]"     # adds the Copilot's dependencies (embeddings, OCR, units)
-# .env (git-ignored): GEMINI_API_KEY=...  optional: GEMINI_VISION_MODEL=gemini-3.5-flash, COPILOT_LLM_PROVIDER=gemini,ollama
+# .env (git-ignored): GROQ_API_KEY=... (bot; free)  optional: GEMINI_API_KEY=... (drawings only), COPILOT_LLM_PROVIDER=groq,ollama
 python -m uvicorn ruletrace.app:app --port 8001
 ```
-Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). Answers use Gemini, then Groq (if
-`GROQ_API_KEY` is set, free), then the local Ollama model; reading drawings and pictures needs Gemini. **Free Gemini
-keys are enough:** they allow about 20 requests per model per day, so the Copilot rotates over nine free flash models
+Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). The bot answers with Groq (if
+`GROQ_API_KEY` is set, free), then the local Ollama model; it never uses Gemini. **Gemini is optional** and only
+reads drawings and pictures. **Free Gemini keys are enough:** they allow about 20 requests per model per day, so the Copilot rotates over nine free flash models
 (`rulemate/llm.py`, `GEMINI_FREE_MODELS`) and skips one for the day when its quota is used up; that is roughly 180
 requests a day. Readings are cached per image under `VARTIJA_UPLOAD_DIR/copilot`, so a warmed-up demo makes no calls. For confidential designs use
-Gemini on Vertex AI in an EU region, or leave the key unset (questions then run fully offline on Ollama).
+Gemini on Vertex AI in an EU region, or leave the key unset (everything except reading drawings works without it).
 
 Code: `ruletrace/copilot_api.py` (endpoints, added like `llm_api.py`), `ruletrace/static/copilot.js` / `.css` (panel),
 `rulemate/` (retrieval, answer checks, rule-text parsers, unit-aware checks, Gemini readers), `tests/test_copilot.py`.

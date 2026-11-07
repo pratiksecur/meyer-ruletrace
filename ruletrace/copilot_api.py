@@ -6,7 +6,13 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
     GET  /ruletrace/copilot/status          what is installed and ready (index, Gemini key, local model)
     POST /ruletrace/copilot/index           build the clause index of the full regulation texts (once, ~30 s)
     POST /ruletrace/copilot/ask             question -> answer citing clauses of the official texts; every
-                                            citation, number and quote checked in code, or "not found"
+                                            citation, number and quote checked in code. A question the texts do
+                                            not answer gets a general answer, labelled "not from the loaded rules,
+                                            not verified". The bot uses Groq and Ollama only.
+    POST /ruletrace/copilot/review          an engineer approves or rejects an item that needs a human (NEEDS
+                                            REVIEW verdict, a Gemini reading, a general answer); audit chain
+    GET  /ruletrace/copilot/reviews         the decisions made so far
+    GET  /ruletrace/copilot/accuracy        measured accuracy of each part, with caveats
     GET  /ruletrace/copilot/clause/{uid}    a clause with its parent, sub-clauses, references and referenced-by
     GET  /ruletrace/copilot/browse          clauses of a document (outline), or a search over the full texts
     POST /ruletrace/copilot/check           design values (space, parameter, value, unit) -> PASS / FAIL / NEEDS
@@ -18,7 +24,11 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
                                             it, code confirms every reading on the image; picture values are
                                             checked against the full texts
     POST /ruletrace/copilot/design          rooms read from a drawing -> a RuleTrace design (cabins, hospital,
-                                            spaces), checked by the rule engine and shown in 3D
+                                            spaces), checked by the rule engine and shown in 3D. Needs an
+                                            engineer's approval of the readings first (approved=true)
+
+Gemini is optional and kept apart: it only reads drawings and pictures (GEMINI_API_KEY). Without it, everything
+else works.
 
 The regulation texts (public domain) are in ruletrace/copilot_rules/: 46 CFR Part 190 and the ADA/ABA technical
 requirements (36 CFR 1191 App. D). The index and caches live under VARTIJA_UPLOAD_DIR/copilot (git-ignored).
@@ -60,6 +70,17 @@ class CheckIn(BaseModel):
 class DesignIn(BaseModel):
     readings_id: str = Field(pattern=r"^[0-9a-f]{16}$", description="id returned by /copilot/read for a drawing")
     ship: dict = Field(default_factory=dict, description="Ship profile fields (name, ship_type, length_m, persons_total...)")
+    approved: bool = Field(default=False, description="the engineer has checked the readings against the drawing")
+    rejected: list[int] = Field(default_factory=list, description="indexes of readings the engineer rejected")
+    note: str = Field(default="", max_length=500)
+
+
+class ReviewIn(BaseModel):
+    kind: str = Field(pattern=r"^(verdict|reading|general_answer|limit)$")
+    ref: str = Field(min_length=1, max_length=300, description="what was reviewed, e.g. item id and parameter")
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    note: str = Field(default="", max_length=500)
+    detail: dict = Field(default_factory=dict)
 
 
 def configure(upload_dir: Path) -> Path:
@@ -71,9 +92,14 @@ def configure(upload_dir: Path) -> Path:
     return base
 
 
+BOT_PROVIDERS = "groq,ollama"
+
+
 def provider() -> str:
-    # Gemini (rotating over the free flash models), then Groq if a key is set, then the local model
-    return os.getenv("COPILOT_LLM_PROVIDER", "gemini,groq,ollama")
+    """The chat bot uses Groq, then the local Ollama model; never Gemini (kept for reading drawings only)."""
+    names = [n.strip() for n in os.getenv("COPILOT_LLM_PROVIDER", BOT_PROVIDERS).split(",")
+             if n.strip() and n.strip().lower() != "gemini"]
+    return ",".join(names) or BOT_PROVIDERS
 
 
 def vision_llm():
@@ -113,8 +139,11 @@ def deciding(res) -> dict | None:
         v = x.value_in_limit_unit
         return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
 
-    d = failed[0] if failed else min(ap, key=margin)
-    return {"limit": d.limit.describe(), "uid": d.limit.clause_uid, "clause": f"{d.limit.doc} § {d.limit.clause_id}"}
+    d = min(failed or ap, key=margin)  # the closest limit: for a fail, the one missed by the least
+    # numbers for the value-vs-limit chart, both in the limit's unit
+    return {"limit": d.limit.describe(), "uid": d.limit.clause_uid, "clause": f"{d.limit.doc} § {d.limit.clause_id}",
+            "limit_value": d.limit.value, "value_in_limit_unit": d.value_in_limit_unit, "unit": d.limit.unit,
+            "comparator": d.limit.comparator}
 
 
 def design_from_rooms(rooms: list[dict], page_w: float, page_h: float, ship: dict, filename: str, page: int) -> dict:
@@ -126,7 +155,7 @@ def design_from_rooms(rooms: list[dict], page_w: float, page_h: float, ship: dic
     elements = []
     seen: set[str] = set()
     for i, r in enumerate(rooms):
-        if not r["confirmed"] or r["kind"] not in ("stateroom", "hospital"):
+        if not r["confirmed"] or r["kind"] not in ("stateroom", "hospital") or r.get("rejected"):
             continue
         key = r.get("room_number") or f"{r['label']}-{i}"
         if key in seen:
@@ -179,7 +208,8 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         except HTTPException as e:
             return {"installed": False, "message": e.detail}
         out = {"installed": True, "index": _index_ready(), "provider": provider(),
-               "gemini": bool(os.getenv("GEMINI_API_KEY")), "documents": []}
+               "gemini": bool(os.getenv("GEMINI_API_KEY")), "gemini_role": "optional: reads drawings and pictures only",
+               "documents": []}
         if out["index"]:
             from rulemate.ingest import load_index
 
@@ -213,9 +243,17 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
 
         a = answer_question(body.question, retriever=get_retriever(), llm=get_llm(provider()), use_cache=True,
                             docs=body.docs)
+        general = None
+        if a.status == "not_found":  # not in the loaded texts: answer from general knowledge, clearly labelled
+            from rulemate.general import general_answer
+
+            general = general_answer(body.question, get_llm(provider()))
         _audit(who, "copilot.asked", {"question": body.question, "status": a.status, "model": a.model,
-                                      "cited": [c.uid for c in a.citations]})
+                                      "cited": [c.uid for c in a.citations],
+                                      "general": bool(general and general["ok"]),
+                                      "general_model": general["model"] if general else ""})
         return {"question": a.question, "status": a.status, "badge": a.badge, "text": a.text, "model": a.model,
+                "general": general,
                 "note": a.note, "latency_ms": a.latency_ms, "rejected_attempts": a.rejected_attempts,
                 "citations": [{"uid": c.uid, "doc": c.doc, "clause_id": c.clause_id, "title": c.title,
                                "page": c.page} for c in a.citations]}
@@ -398,6 +436,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                 "verdict": r.shown_verdict if r else None,
                 "reason": r.reason if r else ("" if v.confirmed else "not found on the picture: not checked"),
                 "clauses": sorted({f"{x.limit.doc} § {x.limit.clause_id}" for x in r.applied}) if r else [],
+                "deciding": deciding(r) if r else None,
                 "crop": _crop_url(img, v.bbox_px)})
         small = img.copy()
         small.thumbnail((900, 900))
@@ -445,6 +484,35 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                             "berths_confirmed": sum(r["berths"] or 0 for r in cabins if r["berths_confirmed"]),
                             "hospital": any(r["confirmed"] and r["kind"] == "hospital" for r in rows)}}
 
+    reviews_file = base / "reviews.jsonl"
+
+    @router.post("/copilot/review")
+    def review(body: ReviewIn, who: Principal = Depends(engineer)) -> dict:
+        """A human decision on something code could not settle alone; kept in the audit chain and listed."""
+        import json
+        from datetime import datetime, timezone
+
+        rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "by": who.name, **body.model_dump()}
+        reviews_file.parent.mkdir(parents=True, exist_ok=True)
+        with reviews_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        _audit(who, "copilot.reviewed", rec)
+        return rec
+
+    @router.get("/copilot/reviews")
+    def reviews(who: Principal = Depends(engineer)) -> list[dict]:
+        import json
+
+        if not reviews_file.exists():
+            return []
+        return [json.loads(x) for x in reviews_file.read_text(encoding="utf-8").splitlines() if x.strip()][-200:][::-1]
+
+    @router.get("/copilot/accuracy")
+    def accuracy(who: Principal = Depends(engineer)) -> dict:
+        import json
+
+        return json.loads((RULES / "accuracy.json").read_text(encoding="utf-8"))
+
     @router.post("/copilot/design")
     def to_design(body: DesignIn, who: Principal = Depends(engineer)) -> dict:
         import json
@@ -454,7 +522,13 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         p = readings_dir / f"{body.readings_id}.json"
         if not p.exists():
             raise HTTPException(404, "read the drawing first (POST /ruletrace/copilot/read)")
+        if not body.approved:
+            raise HTTPException(428, "An engineer must approve the readings first: check the rooms against the drawing, "
+                                     "untick any that are wrong, then confirm.")
         rec = json.loads(p.read_text(encoding="utf-8"))
+        for i in body.rejected:
+            if 0 <= i < len(rec["rooms"]):
+                rec["rooms"][i]["rejected"] = True
         raw = design_from_rooms(rec["rooms"], rec["w"], rec["h"], body.ship, rec["file"], rec["page"])
         if len(raw["elements"]) < MIN_ROOMS:
             found = ", ".join(e["name"] for e in raw["elements"]) or "none"
@@ -468,4 +542,8 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         design.interpretation["source"] = f"{rec['file']} p.{rec['page']}"
         design.interpretation["read_by"] = ("Gemini, every room confirmed in code at its label position; positions "
                                             "approximate (label position scaled to the ship length)")
+        design.interpretation["approved_by"] = who.name
+        _audit(who, "copilot.approved", {"readings_id": body.readings_id, "file": rec["file"], "page": rec["page"],
+                                         "rooms_used": len(raw["elements"]), "rejected": body.rejected,
+                                         "note": body.note})
         return save(design, json.dumps(raw).encode(), f"{Path(rec['file']).stem}_p{rec['page']}_gemini.json", who)

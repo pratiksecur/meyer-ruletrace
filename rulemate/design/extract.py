@@ -136,7 +136,9 @@ def ocr_page(path: Path, page_no: int, dpi: int = DPI) -> list[Word]:
     H, W = img.shape[:2]
 
     def run(arr, ox: int, oy: int) -> list[Word]:
-        res = _engine()(arr)
+        if min(arr.shape[:2]) < 32:  # sliver at the sheet edge: nothing to read, and too small for the OCR
+            return []
+        res = _engine()(np.ascontiguousarray(arr))
         out = []
         for box, txt, sc in zip(res.boxes if res.boxes is not None else [], res.txts or [], res.scores or []):
             xs, ys = [float(q[0]) + ox for q in box], [float(q[1]) + oy for q in box]
@@ -159,7 +161,8 @@ def ocr_page(path: Path, page_no: int, dpi: int = DPI) -> list[Word]:
         step = TILE - OVERLAP
         for ty in range(0, max(1, H - OVERLAP), step):
             for tx in range(0, max(1, W - OVERLAP), step):
-                for w in run(img[ty : ty + TILE, tx : tx + TILE], tx, ty):
+                # a contiguous copy: OpenCV's resize inside the OCR crashed (segfault) on slice views of big pages
+                for w in run(np.ascontiguousarray(img[ty : ty + TILE, tx : tx + TILE]), tx, ty):
                     dup = next((i for i, o in enumerate(tiled) if _same(w, o)), None)
                     if dup is None:
                         tiled.append(w)
