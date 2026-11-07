@@ -25,6 +25,9 @@ from .engine import RuleError, check_design, load_rules
 from .model import DesignError, design_from_dict
 
 
+_EXPLAIN_CACHE: dict = {}  # accepted explanations, so clicking the same finding twice is instant
+
+
 def get_client():
     """One place to build the model client (tests replace this with a fake)."""
     return llm_assist.OllamaClient()
@@ -75,7 +78,7 @@ def add_llm_routes(app, router, engineer, path_of) -> None:
         if body and body.rule_id:  # one finding, e.g. the one the engineer clicked in the viewer
             findings = [f for f in findings if f["rule_id"] == body.rule_id
                         and (body.element_id is None or f.get("element_id") == body.element_id)]
-        items = llm_assist.explain_findings(client, findings, (body.limit if body else 8))
+        items = llm_assist.explain_findings(client, findings, (body.limit if body else 8), cache=_EXPLAIN_CACHE)
         _audit(who, "design.explained", {"design_id": design_id, "design_sha256": rec["sha256"],
                                          "model": client.name, "explained": len(items),
                                          "fell_back_to_rules": sum(1 for i in items if i["source"] == "rules")})

@@ -116,6 +116,7 @@ def main() -> None:
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--json")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--only", choices=["explain", "draft"], help="run just one model test (faster to iterate)")
     a = ap.parse_args()
     rules = [r.__dict__ for r in load_rules()]
     report = {"rules_in_pack": len(rules), "retrieval": retrieval(rules)}
@@ -127,13 +128,20 @@ def main() -> None:
             sys.exit("Ollama is not ready; fix that or use --no-llm")
         t = time.time()
         report["model"] = client.name
-        report["explanations"] = explanations(client, limit_per_design=a.limit or 6)
-        report["rule_drafting_round_trip"] = round_trip(client, rules, a.limit)
+        if a.only in (None, "explain"):
+            report["explanations"] = explanations(client, limit_per_design=a.limit or 6)
+        if a.only in (None, "draft"):
+            report["rule_drafting_round_trip"] = round_trip(client, rules, a.limit)
         report["seconds"] = round(time.time() - t)
     print(json.dumps({k: v for k, v in report.items() if k != "rule_drafting_round_trip"}, indent=2))
     if "rule_drafting_round_trip" in report:
         rt = {k: v for k, v in report["rule_drafting_round_trip"].items() if k != "rows"}
         print(json.dumps({"rule_drafting_round_trip": rt}, indent=2))
+        for row in report["rule_drafting_round_trip"]["rows"]:      # why drafts were rejected, or what differed
+            if "problems" in row or "error" in row:
+                print("REJECTED", row["rule_id"], "->", row.get("problems") or row.get("error"))
+            elif row["draft_check"] != row["gold_check"]:
+                print("DIFFERS ", row["rule_id"], "\n   draft:", row["draft_check"], "\n   gold: ", row["gold_check"])
     if a.json:
         Path(a.json).write_text(json.dumps(report, indent=2), encoding="utf-8")
         print("saved", a.json)

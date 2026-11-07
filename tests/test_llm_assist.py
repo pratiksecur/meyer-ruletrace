@@ -45,6 +45,20 @@ def test_citation_is_added_by_code_when_model_omits_it():
     assert again[0]["parts"]["requirement"].count("2.1.1") == 1     # not duplicated when the model has it
 
 
+def test_cache_repeats_accepted_answers_only():
+    calls = []
+    def reply(user):
+        calls.append(1)
+        return good_parts()
+    cache = {}
+    a = la.explain_findings(Fake(reply), [FINDING], cache=cache)
+    b = la.explain_findings(Fake(reply), [FINDING], cache=cache)
+    assert len(calls) == 1 and b[0].get("cached") and b[0]["parts"] == a[0]["parts"]
+    bad_cache = {}
+    la.explain_findings(Fake("not json"), [FINDING], cache=bad_cache)
+    assert bad_cache == {}                      # a fallback is never cached
+
+
 def test_explain_rejects_invented_numbers_missing_values_and_claims():
     for bad in (good_parts(fix="Widen it by 50 mm to 950 mm."),            # invented numbers
                 good_parts(design_state="Stairway 3B is too narrow."),    # actual value missing

@@ -180,13 +180,19 @@ def _check_parts(parts: dict, f: dict, source: str) -> None:
         raise LLMError("answer made a compliance claim")
 
 
-def explain_findings(client, findings: list[dict], limit: int = 8) -> list[dict]:
+def explain_findings(client, findings: list[dict], limit: int = 8, cache: dict | None = None) -> list[dict]:
+    """``cache`` (optional dict) keeps ACCEPTED answers, so repeating a finding is instant. Fallbacks are never cached."""
     chosen = [f for f in findings if f.get("status") in ("fail", "warn")][:limit]
     out = []
     for f in chosen:
         facts = {k: f.get(k) for k in _EXPLAIN_FIELDS}
         source = json.dumps(facts, ensure_ascii=False)
         item = {"rule_id": f["rule_id"], "element_id": f.get("element_id"), "status": f["status"]}
+        key = (client.name, source)
+        if cache is not None and key in cache:
+            out.append({**item, "parts": cache[key], "explanation": " ".join(v for v in cache[key].values() if v),
+                        "source": client.name, "cached": True})
+            continue
         try:
             parts = parse_json_object(client.complete(SYSTEM_EXPLAIN, f"<finding>{source}</finding>", json_mode=True))
             parts = {k: parts.get(k) for k in _PARTS}
@@ -195,6 +201,8 @@ def explain_findings(client, findings: list[dict], limit: int = 8) -> list[dict]
                 # The citation is added by code, so it is always exact and never depends on the model.
                 parts["requirement"] = f"[{f.get('regime', '')}, {f['ref']}] {parts['requirement']}"
             _check_parts(parts, f, source)
+            if cache is not None:
+                cache[key] = parts
             out.append({**item, "parts": parts, "explanation": " ".join(v for v in parts.values() if v),
                         "source": client.name})
         except LLMError as exc:
