@@ -138,7 +138,7 @@ def test_check_example_csv(indexed):
     csv = indexed.get("/ruletrace/copilot/example.csv", headers=ENG).text
     r = indexed.post("/ruletrace/copilot/check/csv", headers=ENG, data={"docs": "36CFR1191AppD"},
                      files={"file": ("example.csv", csv.encode(), "text/csv")}).json()
-    assert r["counts"] == {"PASS": 5, "FAIL": 4, "NEEDS REVIEW": 0}
+    assert r["counts"] == {"PASS": 5, "FAIL": 4, "NEEDS REVIEW": 0, "NO RULE": 0, "CHECK INPUT": 0}
 
 
 def test_browse_search_and_clause_navigation(indexed):
@@ -175,3 +175,29 @@ def test_check_file_csv(indexed):
     r = indexed.post("/ruletrace/copilot/check/file", headers=ENG, data={"docs": "36CFR1191AppD"},
                      files={"file": ("example.csv", csv.encode(), "text/csv")}).json()
     assert r["kind"] == "csv" and r["counts"]["FAIL"] == 4
+
+
+
+def test_values_no_rule_covers_are_no_rule(indexed):
+    rows = [{"space": "Main dimensions", "parameter": "length overall", "value": "60", "unit": "m"},
+            {"space": "Main dimensions", "parameter": "frame spacing", "value": "600", "unit": "mm"}]
+    r = indexed.post("/ruletrace/copilot/check", headers=ENG, json={"rows": rows}).json()
+    assert r["counts"]["NO RULE"] == 2 and r["counts"]["PASS"] == 0  # never a false PASS
+
+
+def test_too_few_rooms_make_no_design(indexed, monkeypatch):
+    from pathlib import Path
+
+    import rulemate.design.extract as extract
+    import rulemate.design.vision as vision
+    from rulemate.design.vision import VisionRoom
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    monkeypatch.setattr(vision, "read_sheet", lambda path, page, llm, words, dpi=150: [
+        VisionRoom("CAPTAIN", None, "stateroom", 1, (600, 400, 640, 428), True, False)])
+    monkeypatch.setattr(extract, "ocr_page", lambda path, page, dpi=200: [])
+    pdf = Path(__file__).parents[1] / "ruletrace" / "samples" / "demo_ga_drawing.pdf"
+    r = indexed.post("/ruletrace/copilot/read", headers=ENG, data={"page": "1"},
+                     files={"file": ("ga.pdf", pdf.read_bytes(), "application/pdf")}).json()
+    d = indexed.post("/ruletrace/copilot/design", headers=ENG, json={"readings_id": r["readings_id"], "ship": {}})
+    assert d.status_code == 422 and "too few" in d.json()["detail"]

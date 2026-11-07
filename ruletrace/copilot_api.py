@@ -43,6 +43,7 @@ from vartija_core.api import Principal
 RULES = Path(__file__).parent / "copilot_rules"
 DEFAULT_DOCS = ["36CFR1191AppD", "46CFR190"]
 MAX_PDF_PAGES = 400
+MIN_ROOMS = 3  # fewer confirmed rooms than this make no meaningful RuleTrace design
 
 
 class AskIn(BaseModel):
@@ -252,11 +253,11 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                 return abs(v - x.limit.value) / abs(x.limit.value) if v is not None and x.limit.value else 9e9
             dec = failed[0] if failed else (min(ap, key=margin) if ap else None)
             out.append({"item_id": res.row.item_id, "space": res.row.space, "parameter": res.row.parameter,
-                        "value": res.row.display, "verdict": res.verdict, "reason": res.reason,
+                        "value": res.row.display, "verdict": res.shown_verdict, "reason": res.reason,
                         "deciding": ({"limit": dec.limit.describe(), "uid": dec.limit.clause_uid,
                                       "clause": f"{dec.limit.doc} § {dec.limit.clause_id}"} if dec else None),
                         "source": res.row.source})
-        counts = {v: sum(x["verdict"] == v for x in out) for v in ("PASS", "FAIL", "NEEDS REVIEW")}
+        counts = {v: sum(x["verdict"] == v for x in out) for v in ("PASS", "FAIL", "NEEDS REVIEW", "NO RULE", "CHECK INPUT")}
         return {"counts": counts, "results": out, "docs": docs or "all"}
 
     @router.post("/copilot/check")
@@ -314,7 +315,8 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         except Exception as exc:  # Gemini quota, unreadable file
             raise HTTPException(502, f"could not read {name}: {str(exc)[:200]}") from exc
         out = _check(fv.rows, [d for d in docs.split(",") if d]) if fv.rows else {
-            "counts": {"PASS": 0, "FAIL": 0, "NEEDS REVIEW": 0}, "results": [], "docs": docs or "all"}
+            "counts": {"PASS": 0, "FAIL": 0, "NEEDS REVIEW": 0, "NO RULE": 0, "CHECK INPUT": 0}, "results": [],
+            "docs": docs or "all"}
         out.update(kind=fv.kind, notes=fv.notes, file=name)
         if fv.png:
             img = Image.open(io.BytesIO(fv.png)).convert("RGB")
@@ -375,7 +377,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             items.append({
                 "space": v.space, "parameter": v.parameter, "written": v.value_text, "unit": v.unit,
                 "confirmed": v.confirmed, "evidence": v.evidence, "notes": v.notes,
-                "verdict": r.verdict if r else None,
+                "verdict": r.shown_verdict if r else None,
                 "reason": r.reason if r else ("" if v.confirmed else "not found on the picture: not checked"),
                 "clauses": sorted({f"{x.limit.doc} § {x.limit.clause_id}" for x in r.applied}) if r else [],
                 "crop": _crop_url(img, v.bbox_px)})
@@ -427,8 +429,11 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             raise HTTPException(404, "read the drawing first (POST /ruletrace/copilot/read)")
         rec = json.loads(p.read_text(encoding="utf-8"))
         raw = design_from_rooms(rec["rooms"], rec["w"], rec["h"], body.ship, rec["file"], rec["page"])
-        if not raw["elements"]:
-            raise HTTPException(400, "no confirmed cabins or hospital on this sheet")
+        if len(raw["elements"]) < MIN_ROOMS:
+            found = ", ".join(e["name"] for e in raw["elements"]) or "none"
+            raise HTTPException(422, f"Only {len(raw['elements'])} cabin(s)/hospital confirmed on this sheet ({found}): too few "
+                                     "for a meaningful design check. This drawing may not print names on its cabins, or "
+                                     "another sheet shows the accommodation.")
         try:
             design = design_from_dict(raw, source_file=rec["file"])
         except DesignError as exc:

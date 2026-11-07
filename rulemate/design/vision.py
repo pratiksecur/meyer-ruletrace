@@ -144,6 +144,56 @@ def verify(proposals: list[dict], words: list[Word], page_w: float, page_h: floa
     return out
 
 
+TILE_PT = 1400  # a sheet larger than this (about A3) is read in tiles so small labels stay legible
+
+
+def tile_grid(w: float, h: float, max_tiles: int | None = None) -> list[tuple[float, float, float, float]]:
+    """Overlapping tiles covering a sheet, at most max_tiles (GEMINI_MAX_TILES, default 4: one request each)."""
+    import math
+    import os
+
+    max_tiles = max_tiles or int(os.getenv("GEMINI_MAX_TILES", "4"))
+    cols, rows = max(1, math.ceil(w / TILE_PT)), max(1, math.ceil(h / TILE_PT))
+    while cols * rows > max_tiles:
+        if cols >= rows and cols > 1:
+            cols -= 1
+        elif rows > 1:
+            rows -= 1
+    ox, oy = 0.06 * w / cols if cols > 1 else 0, 0.06 * h / rows if rows > 1 else 0
+    return [(max(0, c * w / cols - ox), max(0, r * h / rows - oy), min(w, (c + 1) * w / cols + ox),
+             min(h, (r + 1) * h / rows + oy)) for r in range(rows) for c in range(cols)]
+
+
 def read_sheet(path: Path, page_no: int, llm, words: list[Word], dpi: int = 150) -> list[VisionRoom]:
-    png, w, h = render_png(path, page_no, dpi)
-    return verify(ask_gemini(llm, png), words, w, h)
+    import pdfplumber
+
+    with pdfplumber.open(path) as pdf:
+        w, h = float(pdf.pages[page_no - 1].width), float(pdf.pages[page_no - 1].height)
+    tiles = tile_grid(w, h)
+    if len(tiles) == 1:
+        png, w, h = render_png(path, page_no, dpi)
+        return verify(ask_gemini(llm, png), words, w, h)
+    proposals: list[dict] = []
+    for (x0, y0, x1, y1) in tiles:  # each tile at full resolution; boxes mapped back to the whole sheet
+        with pdfplumber.open(path) as pdf:
+            res = max(72, min(200, int(3000 * 72 / max(x1 - x0, y1 - y0))))
+            img = pdf.pages[page_no - 1].crop((x0, y0, x1, y1)).to_image(resolution=res).original.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        for p in ask_gemini(llm, buf.getvalue()):
+            try:
+                ty0, tx0, ty1, tx1 = (float(v) for v in p.get("box_2d") or [])
+            except (TypeError, ValueError):
+                continue
+            p["box_2d"] = [(y0 + ty0 / 1000 * (y1 - y0)) / h * 1000, (x0 + tx0 / 1000 * (x1 - x0)) / w * 1000,
+                           (y0 + ty1 / 1000 * (y1 - y0)) / h * 1000, (x0 + tx1 / 1000 * (x1 - x0)) / w * 1000]
+            proposals.append(p)
+    # the same label seen in two overlapping tiles is one reading
+    kept: list[dict] = []
+    for p in proposals:
+        cy, cx = (p["box_2d"][0] + p["box_2d"][2]) / 2, (p["box_2d"][1] + p["box_2d"][3]) / 2
+        if not any(_norm(p.get("label", "")) == _norm(k.get("label", "")) and
+                   abs(cy - (k["box_2d"][0] + k["box_2d"][2]) / 2) < 8 and abs(cx - (k["box_2d"][1] + k["box_2d"][3]) / 2) < 8
+                   for k in kept):
+            kept.append(p)
+    return verify(kept, words, w, h)

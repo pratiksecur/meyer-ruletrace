@@ -174,7 +174,9 @@ $c("#cpRead").onclick = async () => {
   catch (e) { $c("#cpOut").innerHTML = `<div class="ans" style="color:var(--fail)">${esc(e.message)}</div>`; }
   finally { $c("#cpRead").disabled = false; }
 };
-const pill = v => v ? `<span class="pill ${v === "PASS" ? "pass" : v === "FAIL" ? "fail" : "warn"}">${esc(v)}</span>` : `<span class="pill unknown">not checked</span>`;
+const pill = v => v ? `<span class="pill ${v === "PASS" ? "pass" : v === "FAIL" ? "fail" : v === "NO RULE" || v === "CHECK INPUT" ? "unknown" : "warn"}"
+  title="${v === "NO RULE" ? "None of the loaded rule texts limits this value" : v === "NEEDS REVIEW" ? "A rule applies, but a condition must be confirmed" : v === "CHECK INPUT" ? "The value is not a number or has no unit" : ""}">${esc(v)}</span>`
+  : `<span class="pill unknown">not checked</span>`;
 function showPicture(r) {
   const counts = ["PASS", "FAIL", "NEEDS REVIEW"].map(v => r.items.filter(i => i.verdict === v).length);
   $c("#cpOut").innerHTML = `<div class="sum"><div><b>${r.n_confirmed}/${r.n_readings}</b>values confirmed</div>
@@ -257,8 +259,11 @@ $c("#cpExample").onclick = async () => {
   runCheck(new File([await r.text()], "accessible_stateroom_example.csv", {type: "text/csv"}));
 };
 function showCheck(r) {
-  $c("#cpCheckOut").innerHTML = `<div class="sum"><div><b style="color:var(--fail)">${r.counts.FAIL}</b>fail</div>
-      <div><b style="color:var(--warn)">${r.counts["NEEDS REVIEW"]}</b>needs review</div><div><b style="color:var(--pass)">${r.counts.PASS}</b>pass</div></div>
+  $c("#cpCheckOut").innerHTML = `<div class="sum" style="grid-template-columns:repeat(4,1fr)"><div><b style="color:var(--fail)">${r.counts.FAIL}</b>fail</div>
+      <div><b style="color:var(--warn)">${r.counts["NEEDS REVIEW"]}</b>review</div><div><b style="color:var(--pass)">${r.counts.PASS}</b>pass</div>
+      <div><b style="color:var(--unknown)">${(r.counts["NO RULE"] || 0) + (r.counts["CHECK INPUT"] || 0)}</b>no rule / input</div></div>
+    ${r.counts["NO RULE"] ? `<div class="small muted" style="margin-top:6px"><b>NO RULE</b>: none of the loaded rule texts (${esc(Array.isArray(r.docs) ? r.docs.join(", ") : r.docs)}) limits these values; add the rule (e.g. class rules, SOLAS) to check them. Not the same as NEEDS REVIEW, where a rule applies but a condition must be confirmed.</div>` : ""}
+    ${r.counts["CHECK INPUT"] ? `<div class="small muted"><b>CHECK INPUT</b>: the value is not a single number or has no unit (e.g. a crane rating "4T/14M", a dimension without mm/in); correct it and check again.</div>` : ""}
     ${r.results.map((x, i) => `<div class="item" data-ci="${i}"><div class="h"><span class="t">${esc(x.parameter)}: ${esc(x.value)}</span>${pill(x.verdict)}</div>
       <div class="small muted">${esc(x.item_id)} · ${esc(x.space)}${x.deciding ? ` · ${esc(x.deciding.limit)} <span class="cite" data-uid="${esc(x.deciding.uid)}">${esc(x.deciding.clause)}</span>` : " · no matching limit"}</div>
       <div class="more" hidden>${x.crop ? `<img src="${x.crop}" alt="">` : ""}<pre>${esc(x.reason)}</pre>
