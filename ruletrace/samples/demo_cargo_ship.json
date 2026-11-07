@@ -1,0 +1,239 @@
+{
+  "title": "Demo cargo ship: hull, deck openings and rails (synthetic)",
+  "ship": {
+    "name": "MV Demo Kestrel (synthetic)",
+    "ship_type": "cargo",
+    "passengers": 0,
+    "persons_total": 18,
+    "length_m": 120,
+    "breadth_m": 20,
+    "gross_tonnage": 9000,
+    "keel_laid": "2026-03-01",
+    "flag": "FI",
+    "operating_areas": [],
+    "notes": "Synthetic. Planted Load Line and SOLAS II-1 issues: collision bulkhead, double bottom, ventilator, air pipe, door sill, guard rail."
+  },
+  "elements": [
+    {
+      "id": "CK-CB",
+      "type": "bulkhead",
+      "name": "Collision bulkhead (fr. 168)",
+      "deck": "Hold",
+      "zone": "",
+      "box": [
+        115,
+        -10,
+        0,
+        0.3,
+        20,
+        12
+      ],
+      "props": {
+        "role": "collision_bulkhead",
+        "distance_from_fp": "5.0 m",
+        "watertight": true
+      }
+    },
+    {
+      "id": "CK-DB",
+      "type": "double_bottom",
+      "name": "Double bottom, cargo hold",
+      "deck": "Tank top",
+      "zone": "",
+      "box": [
+        20,
+        -10,
+        0,
+        90,
+        20,
+        0.95
+      ],
+      "props": {
+        "role": "double_bottom"
+      }
+    },
+    {
+      "id": "CK-V1",
+      "type": "ventilator",
+      "name": "Fore hold ventilator (position 1)",
+      "deck": "Main deck",
+      "zone": "",
+      "box": [
+        95,
+        6,
+        12,
+        0.6,
+        0.6,
+        0.8
+      ],
+      "props": {
+        "position": "1",
+        "coaming_height": "800 mm"
+      }
+    },
+    {
+      "id": "CK-V2",
+      "type": "ventilator",
+      "name": "Engine room ventilator (position 2)",
+      "deck": "Poop deck",
+      "zone": "",
+      "box": [
+        12,
+        6,
+        14.5,
+        0.8,
+        0.8,
+        0.8
+      ],
+      "props": {
+        "position": "2",
+        "coaming_height": "800 mm"
+      }
+    },
+    {
+      "id": "CK-AP1",
+      "type": "air_pipe",
+      "name": "Ballast tank 3 air pipe",
+      "deck": "Main deck",
+      "zone": "",
+      "box": [
+        60,
+        9,
+        12,
+        0.2,
+        0.2,
+        0.7
+      ],
+      "props": {
+        "deck_kind": "freeboard",
+        "height_to_opening": "700 mm"
+      }
+    },
+    {
+      "id": "CK-AP2",
+      "type": "air_pipe",
+      "name": "Fresh water tank air pipe",
+      "deck": "Poop deck",
+      "zone": "",
+      "box": [
+        8,
+        -8,
+        14.5,
+        0.2,
+        0.2,
+        0.5
+      ],
+      "props": {
+        "deck_kind": "superstructure",
+        "height_to_opening": "500 mm"
+      }
+    },
+    {
+      "id": "CK-WD1",
+      "type": "weather_door",
+      "name": "Poop front door, starboard",
+      "deck": "Main deck",
+      "zone": "",
+      "box": [
+        17,
+        5,
+        12,
+        0.1,
+        0.8,
+        2.0
+      ],
+      "props": {
+        "sill_height": "300 mm"
+      }
+    },
+    {
+      "id": "CK-GR1",
+      "type": "guard_rail",
+      "name": "Forecastle guard rail",
+      "deck": "Forecastle deck",
+      "zone": "",
+      "box": [
+        100,
+        -9,
+        14.5,
+        15,
+        0.1,
+        1.0
+      ],
+      "props": {
+        "height": "1.0 m",
+        "lowest_opening": "250 mm"
+      }
+    },
+    {
+      "id": "CK-NL-FWD",
+      "type": "nav_light",
+      "name": "Forward masthead light",
+      "deck": "Mast",
+      "zone": "",
+      "box": [
+        100,
+        -0.2,
+        25,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "props": {
+        "role": "forward_masthead",
+        "height_above_hull": "13 m"
+      }
+    },
+    {
+      "id": "CK-NL-AFT",
+      "type": "nav_light",
+      "name": "After masthead light",
+      "deck": "Mast",
+      "zone": "",
+      "box": [
+        35,
+        -0.2,
+        30.5,
+        0.3,
+        0.3,
+        0.3
+      ],
+      "props": {
+        "role": "after_masthead",
+        "height_above_hull": "18.5 m"
+      }
+    }
+  ],
+  "expected": [
+    {
+      "rule_id": "SOLAS-II-1-12.1-COLLISION-BHD-MIN",
+      "element_id": "CK-CB",
+      "status": "fail"
+    },
+    {
+      "rule_id": "SOLAS-II-1-9.2-DOUBLE-BOTTOM-HEIGHT",
+      "element_id": "CK-DB",
+      "status": "fail"
+    },
+    {
+      "rule_id": "LL-19-VENT-COAMING-POS1",
+      "element_id": "CK-V1",
+      "status": "fail"
+    },
+    {
+      "rule_id": "LL-20-AIR-PIPE-FREEBOARD-DECK",
+      "element_id": "CK-AP1",
+      "status": "fail"
+    },
+    {
+      "rule_id": "LL-12-DOOR-SILL",
+      "element_id": "CK-WD1",
+      "status": "fail"
+    },
+    {
+      "rule_id": "LL-25-GUARD-RAIL-LOWEST-OPENING",
+      "element_id": "CK-GR1",
+      "status": "fail"
+    }
+  ]
+}

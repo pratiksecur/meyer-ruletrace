@@ -1,0 +1,106 @@
+# International Convention on Load Lines, 1966 (as modified by the 1988 Protocol), Annex I, chapter II:
+# conditions of assignment of freeboard. These are the openings and fittings that keep water out of the
+# hull and protect the crew on deck. The convention applies to ships of 24 m in length and over.
+#
+# "Position 1" = exposed freeboard and raised quarter decks, and exposed superstructure decks forward of
+# 0.25 L. "Position 2" = exposed superstructure decks aft of 0.25 L (LL regulation 13).
+# Set the `position` property on each ventilator ("1" or "2") and the `deck_kind` property on each
+# air pipe ("freeboard" or "superstructure").
+
+- id: LL-19-VENT-COAMING-POS1
+  title: Ventilator coaming height, position 1
+  regime: Load Line
+  ref: "ICLL 1966/88 Annex I, reg. 19(1)"
+  quote: "Ventilators in position 1 shall have coamings of a height of at least 900 millimetres"
+  source_url: https://www.wartsila.com/encyclopedia/term/ventilator-coaming-heights
+  verified: true
+  applies_if: {length_m_at_least: 24}
+  target: {type: ventilator, when: {position: "1"}}
+  check: {property: coaming_height, requirement: "at least 900 mm"}
+  severity: major
+  why: A low coaming lets green water on deck run down the ventilator into the hull.
+  fix: Raise the ventilator coaming to at least 900 mm above the deck, or move it to a more sheltered position.
+
+- id: LL-19-VENT-COAMING-POS2
+  title: Ventilator coaming height, position 2
+  regime: Load Line
+  ref: "ICLL 1966/88 Annex I, reg. 19(1)"
+  quote: "in position 2 the coamings shall be of a height at least 760 millimetres"
+  source_url: https://www.wartsila.com/encyclopedia/term/ventilator-coaming-heights
+  verified: true
+  applies_if: {length_m_at_least: 24}
+  target: {type: ventilator, when: {position: "2"}}
+  check: {property: coaming_height, requirement: "at least 760 mm"}
+  severity: major
+  why: A low coaming lets water on deck run down the ventilator into the hull.
+  fix: Raise the ventilator coaming to at least 760 mm above the deck.
+
+- id: LL-20-AIR-PIPE-FREEBOARD-DECK
+  title: Air pipe height on the freeboard deck
+  regime: Load Line
+  ref: "ICLL 1966 Annex I, reg. 20 (UI MSC.1/Circ.1534)"
+  quote: "760 mm on the freeboard deck"
+  source_url: https://www.mardep.gov.hk/en/msnote/pdf/msin1654anx1.pdf
+  verified: true
+  applies_if: {length_m_at_least: 24}
+  target: {type: air_pipe, when: {deck_kind: freeboard}}
+  check: {property: height_to_opening, requirement: "at least 760 mm"}
+  severity: major
+  why: Tank air pipes that are too low can flood the tank (and the ship) when the deck is awash.
+  fix: Raise the air pipe so its opening is at least 760 mm above the freeboard deck.
+
+- id: LL-20-AIR-PIPE-SUPERSTRUCTURE-DECK
+  title: Air pipe height on a superstructure deck
+  regime: Load Line
+  ref: "ICLL 1966 Annex I, reg. 20 (UI MSC.1/Circ.1534)"
+  quote: "450 mm on other exposed decks"
+  source_url: https://www.traficom.fi/files/media/regulation/22600-MSC_1-Circ_1535_-_UI_to_the_Load_Line_Protocol_1988.pdf
+  verified: true
+  applies_if: {length_m_at_least: 24}
+  target: {type: air_pipe, when: {deck_kind: superstructure}}
+  check: {property: height_to_opening, requirement: "at least 450 mm"}
+  severity: major
+  why: Tank air pipes that are too low can let water into the tank when the deck is awash.
+  fix: Raise the air pipe so its opening is at least 450 mm above the superstructure deck.
+
+- id: LL-12-DOOR-SILL
+  title: Door sill height in a superstructure end bulkhead
+  regime: Load Line
+  ref: "ICLL 1966 Annex I, reg. 12(2)"
+  quote: ""
+  source_url: https://www.scribd.com/doc/279302535/Ui-Ll-Pdf900
+  verified: false
+  applies_if: {length_m_at_least: 24}
+  target: {type: weather_door}
+  check: {property: sill_height, requirement: "at least 380 mm"}
+  severity: major
+  why: The sill stops water on deck from flowing through the doorway into the superstructure.
+  fix: Raise the door sill to at least 380 mm above the deck (600 mm where IACS UI LL requires it).
+
+- id: LL-25-GUARD-RAIL-HEIGHT
+  title: Guard rail or bulwark height
+  regime: Load Line
+  ref: "ICLL 1966 Annex I, reg. 25(2)"
+  quote: ""
+  source_url: https://www.iso.org/standard/74627.html
+  verified: false
+  applies_if: {length_m_at_least: 24}
+  target: {type: guard_rail}
+  check: {property: height, requirement: "at least 1 m"}
+  severity: major
+  why: Rails lower than 1 m don't stop a person from going over the side.
+  fix: Raise the guard rail or bulwark to at least 1 m above the deck.
+
+- id: LL-25-GUARD-RAIL-LOWEST-OPENING
+  title: Opening below the lowest guard-rail course
+  regime: Load Line
+  ref: "ICLL 1966 Annex I, reg. 25(3) (as implemented in ISO 5480)"
+  quote: "The opening below the lowest course of rails shall be a maximum of 230 mm"
+  source_url: https://cdn.standards.iteh.ai/samples/11522/d91da70b8e9a4bbfbdb94118329f51db/ISO-5480-1979.pdf
+  verified: true
+  applies_if: {length_m_at_least: 24}
+  target: {type: guard_rail}
+  check: {property: lowest_opening, requirement: "at most 230 mm"}
+  severity: major
+  why: A person lying or sliding on deck can fall through a large gap under the lowest rail.
+  fix: Add or lower the bottom rail so the opening below it is at most 230 mm.

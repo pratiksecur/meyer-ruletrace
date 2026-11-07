@@ -61,7 +61,7 @@ const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer
                 {label:"Ella · admin", user:"ella", roles:"admin"}];
 const PLAIN = {"SOLAS":"Fire safety and escape (SOLAS)", "SOLAS / FSS Code":"Escape stairs (FSS Code)", "COLREG":"Navigation lights (COLREG)",
   "MARPOL":"Engine emissions (MARPOL)", "MLC 2006":"Crew accommodation (MLC)", "PVAG":"Accessibility, US ports (PVAG)",
-  "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency"};
+  "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency", "Load Line":"Deck openings and rails (Load Line)", "SOLAS II-1":"Hull subdivision (SOLAS II-1)"};
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};

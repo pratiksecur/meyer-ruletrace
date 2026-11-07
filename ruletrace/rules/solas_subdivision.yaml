@@ -1,0 +1,46 @@
+# SOLAS chapter II-1, part B-2: subdivision and watertight integrity. Class rules (for example PRS,
+# quoted below) repeat these requirements in their hull rules, so they are checked at class plan approval.
+#
+# Collision bulkhead: set `distance_from_fp` (distance aft of the forward perpendicular) on the
+# element with role `collision_bulkhead`. The ship's `length_m` is used for the load-line length L;
+# for a bulbous bow the distance is measured from a reference point forward of the FP (reg. 12.2),
+# which this check does not yet model.
+
+- id: SOLAS-II-1-12.1-COLLISION-BHD-MIN
+  title: Collision bulkhead not too close to the bow
+  regime: SOLAS II-1
+  ref: "SOLAS II-1/12.1"
+  quote: "not less than 0.05LLL or 10 m, whichever is the less"
+  source_url: https://prs.pl/wp-content/uploads/2024/03/p84p_zm2_en.pdf
+  verified: true
+  target: {type: bulkhead, when: {role: collision_bulkhead}}
+  check: {property: distance_from_fp, requirement_expr: "at least {min(0.05 * ship.length_m, 10)} m"}
+  severity: major
+  why: A collision bulkhead too far forward can be breached in a head-on collision together with the bow.
+  fix: Move the collision bulkhead aft so it is at least 0.05 L (or 10 m, if less) behind the forward perpendicular.
+
+- id: SOLAS-II-1-12.1-COLLISION-BHD-MAX
+  title: Collision bulkhead not too far aft
+  regime: SOLAS II-1
+  ref: "SOLAS II-1/12.1"
+  quote: "not more than 0.08LLL or 0.05LLL + 3 m, whichever is the greater"
+  source_url: https://prs.pl/wp-content/uploads/2024/03/p84p_zm2_en.pdf
+  verified: true
+  target: {type: bulkhead, when: {role: collision_bulkhead}}
+  check: {property: distance_from_fp, requirement_expr: "at most {max(0.08 * ship.length_m, 0.05 * ship.length_m + 3)} m"}
+  severity: major
+  why: If the bulkhead is too far aft, flooding the forepeak after a collision sinks the bow too deep.
+  fix: Move the collision bulkhead forward to within 0.08 L (or 0.05 L + 3 m, if greater) of the forward perpendicular, unless the flag Administration accepts otherwise.
+
+- id: SOLAS-II-1-9.2-DOUBLE-BOTTOM-HEIGHT
+  title: Double bottom height
+  regime: SOLAS II-1
+  ref: "SOLAS II-1/9.2"
+  quote: "h = B/20"
+  source_url: https://umwelt-online.de/recht/gefahr.gut/see/solas/sol_03.htm
+  verified: true
+  target: {type: double_bottom}
+  check: {property: geom.height, requirement_expr: "at least {min(max(ship.breadth_m / 20, 0.76), 2.0)} m"}
+  severity: major
+  why: The inner bottom must sit high enough that a grounding tears the outer bottom only. h = B/20, at least 760 mm, need not exceed 2000 mm.
+  fix: Raise the inner bottom (tank top) to at least B/20 above the keel line (minimum 760 mm, maximum required 2000 mm).

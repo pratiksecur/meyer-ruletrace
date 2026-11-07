@@ -23,10 +23,13 @@ from .model import Design, DesignError, Element, design_from_dict
 CLASS_MAP = {
     "IfcDoor": "door", "IfcStair": "stair", "IfcStairFlight": "stair", "IfcWall": "bulkhead",
     "IfcWallStandardCase": "bulkhead", "IfcRamp": "ramp", "IfcRampFlight": "ramp", "IfcEngine": "diesel_engine",
+    "IfcRailing": "guard_rail",
 }
 SPACE_TYPES = {"corridor": "corridor", "fire_zone": "fire_zone", "main vertical zone": "fire_zone"}
 UNIT_HINTS = {"clear_width": "mm", "threshold_height": "mm", "height_above_deck": "mm", "overall_width": "mm",
-              "height_above_hull": "m"}
+              "height_above_hull": "m",
+              "coaming_height": "mm", "height_to_opening": "mm", "sill_height": "mm", "lowest_opening": "mm",
+              "distance_from_fp": "m"}
 
 
 def _snake(name: str) -> str:
