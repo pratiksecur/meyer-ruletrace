@@ -10,7 +10,7 @@
   source_url: https://www.access-board.gov/pvag/ch-v4/
   verified: true
   applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
-  target: {type: door, when: {accessible_route: true}}
+  target: {type: [door, weather_door], when: {accessible_route: true}}
   check: {property: clear_width, requirement: "at least 815 mm"}
   severity: major
   why: A wheelchair user needs at least 815 mm to pass through a door.
@@ -52,7 +52,7 @@
   source_url: https://idighardware.com/2019/09/decoded-thresholds-and-changes-in-level-november-2019/
   verified: true
   applies_if: {passenger_ship: true, operating_areas_any: [us_ports]}
-  target: {type: door, when: {accessible_route: true}}
+  target: {type: [door, weather_door], when: {accessible_route: true}}
   check: {property: threshold_height, requirement: "at most 13 mm"}
   severity: minor
   why: Higher sills stop wheelchairs; ships often need a ramped sill instead.

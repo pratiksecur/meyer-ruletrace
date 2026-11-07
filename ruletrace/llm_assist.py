@@ -226,8 +226,9 @@ def rule_vocabulary(rules: list[dict]) -> dict:
     types, props = set(), set()
     for r in rules:
         t = r.get("target") or {}
-        if t.get("type") and t["type"] != "ship":
-            types.add(t["type"])
+        for ty in (t.get("type") if isinstance(t.get("type"), list) else [t.get("type")]):
+            if ty and ty != "ship":
+                types.add(ty)
         props.update((t.get("when") or {}).keys())
         p = (r.get("check") or {}).get("property")
         if p and not str(p).startswith("geom."):

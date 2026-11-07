@@ -224,12 +224,14 @@ def _load_one(r: dict) -> tuple[Rule | None, str]:
 
 
 def _key(r: Rule) -> tuple:
-    return (r.target.get("type"), r.check.get("property"))
+    t = r.target.get("type")
+    return (tuple(t) if isinstance(t, list) else t, r.check.get("property"))
 
 
 def _overlap(a: Rule, b: Rule) -> bool:
     """Same kind of part and property, and conditions that can hold together ("doors" overlaps "accessible doors")."""
-    if _key(a) != _key(b):
+    types = lambda r: set(r.target.get("type") if isinstance(r.target.get("type"), list) else [r.target.get("type")])  # noqa: E731
+    if a.check.get("property") != b.check.get("property") or not (types(a) & types(b)):
         return False
     wa, wb = a.target.get("when") or {}, b.target.get("when") or {}
     return all(wa[k] == wb[k] for k in set(wa) & set(wb))
@@ -317,6 +319,8 @@ def analyze(drafts: list[dict], designs: list, current: list[Rule] | None = None
         types = {e.type for e in design.elements}
         row = {"design": name, "new_fail": 0, "new_unknown": 0, "hidden": 0, "extra_issues": 0}
         for f in new["findings"]:
+            if f["rule_id"] not in per_rule:      # conflicts between rules are reported on the design itself
+                continue
             s = per_rule[f["rule_id"]]
             s["checked"] += 1
             s[f["status"] if f["status"] in ("fail", "pass", "unknown") else "fail"] += 1
@@ -355,6 +359,7 @@ def analyze(drafts: list[dict], designs: list, current: list[Rule] | None = None
         stricter = [o for o, k in rel if k == "stricter"]
         same = [o for o, k in rel if k == "same"]
         etype = r.target.get("type")
+        etype = etype[0] if isinstance(etype, list) else etype
         if conflicts:
             v, kind = (f"Conflicts with {', '.join(o.id for o in conflicts)}: no design can meet both "
                        f"({_req_text(r)} vs {', '.join(_req_text(o) for o in conflicts)})."), "flaw"

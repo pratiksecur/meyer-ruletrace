@@ -86,3 +86,19 @@ def test_load_line_and_subdivision_rules_on_cargo_sample():
     assert fails == {(x["rule_id"], x["element_id"]) for x in d.expected}
     db = next(f for f in r["findings"] if f["rule_id"] == "SOLAS-II-1-9.2-DOUBLE-BOTTOM-HEIGHT")
     assert db["measured"] == "measured from the 3D geometry" and "1 m" in db["required"]
+
+
+def test_two_regulations_that_cannot_both_be_met_are_flagged():
+    """A weathertight door on an accessible route: Load Line wants a sill of at least 380 mm, ADA at most 13 mm."""
+    from pathlib import Path
+    from ruletrace.engine import check_design
+    from ruletrace.model import load_design
+    r = check_design(load_design(Path(__file__).resolve().parent.parent / "ruletrace" / "samples" / "demo_open_deck_door.json"))
+    c = [f for f in r["findings"] if f["rule_id"].startswith("CONFLICT-")]
+    assert len(c) == 1 and c[0]["element_id"] == "D-OD-1" and c[0]["status"] == "fail"
+    assert set(c[0]["conflicting_rules"]) == {"LL-12-DOOR-SILL", "ADA-404.2.5-THRESHOLD"}
+    assert "does not decide which rule wins" in c[0]["fix"] and "I/5" in c[0]["fix"]
+    # the crew-only door is not on an accessible route, so there is no conflict there
+    assert not any(f["element_id"] == "D-OD-2" for f in c)
+    # a conflict needs a human decision like any other problem
+    assert r["counts"]["fail"] == 2

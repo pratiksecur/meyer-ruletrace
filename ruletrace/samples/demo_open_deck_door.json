@@ -1,0 +1,71 @@
+{
+  "title": "Demo cruise ship: open-deck door on an accessible route (synthetic)",
+  "ship": {
+    "name": "MS Demo Aurora (synthetic)",
+    "ship_type": "passenger",
+    "passengers": 180,
+    "persons_total": 260,
+    "length_m": 45,
+    "breadth_m": 11,
+    "gross_tonnage": 2900,
+    "keel_laid": "2026-03-01",
+    "flag": "FI",
+    "operating_areas": [
+      "us_ports"
+    ],
+    "notes": "Synthetic. A weathertight door to the open deck that is also on the accessible route: Load Line wants a high sill, ADA a low threshold."
+  },
+  "elements": [
+    {
+      "id": "D-OD-1",
+      "type": "weather_door",
+      "name": "Door to open deck, aft (accessible route)",
+      "deck": "Deck 5",
+      "zone": "",
+      "box": [
+        20,
+        5,
+        9,
+        0.1,
+        1.0,
+        2.1
+      ],
+      "props": {
+        "accessible_route": true,
+        "clear_width": "900 mm",
+        "sill_height": "380 mm"
+      }
+    },
+    {
+      "id": "D-OD-2",
+      "type": "weather_door",
+      "name": "Door to open deck, forward (crew only)",
+      "deck": "Deck 5",
+      "zone": "",
+      "box": [
+        32,
+        5,
+        9,
+        0.1,
+        0.9,
+        2.1
+      ],
+      "props": {
+        "clear_width": "800 mm",
+        "sill_height": "380 mm"
+      }
+    }
+  ],
+  "expected": [
+    {
+      "rule_id": "ADA-404.2.5-THRESHOLD",
+      "element_id": "D-OD-1",
+      "status": "fail"
+    },
+    {
+      "rule_id": "CONFLICT-ADA-404.2.5-THRESHOLD-LL-12-DOOR-SILL",
+      "element_id": "D-OD-1",
+      "status": "fail"
+    }
+  ]
+}

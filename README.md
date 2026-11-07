@@ -152,6 +152,20 @@ Operating areas: `us_ports`, `north_american_eca`, `us_caribbean_eca`, `baltic_s
 - Every decision is written to the audit chain (`finding.reviewed`, `check.prepared`, `check.approved`,
   `rule.reviewed`, `ruleset.activated`) with the design's fingerprint.
 
+## When two regulations conflict
+
+Some parts are covered by two rules that set opposite limits on the same physical value. RuleTrace finds these
+and reports a **"Two regulations conflict"** finding naming both rules, their limits and why no value meets both.
+The sample *Demo cruise ship: open-deck door on an accessible route* shows the classic case: a weathertight door
+to the open deck that is also on the accessible route, where the Load Line Convention needs a sill of at least
+380 mm and the ADA a threshold of at most 13 mm (a door's sill and threshold are treated as one physical thing).
+
+RuleTrace never decides which rule wins. The finding lists the usual ways out (change the design so both are met;
+precedence of mandatory flag-state rules over guidance and owner requirements, confirmed with the Administration;
+an equivalent arrangement accepted by the flag or class under SOLAS reg. I/5 / Load Line Article 8), and the
+decision goes through the normal engineer review and second-person sign-off, into the audit record and the report.
+New rule sets are checked for the same kind of conflict before they are used.
+
 ## Comparing revisions and the compliance report
 
 - **Compare two revisions** (left panel, *Compare two revisions*): pick the older and the newer design, or *Try it:

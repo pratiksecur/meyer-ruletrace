@@ -214,13 +214,20 @@ class _Ctx:
 
 # -- checking ----------------------------------------------------------------------------------
 
+def target_types(rule: Rule) -> tuple[str, ...]:
+    """A rule's target type(s): `type: door` or `type: [door, weather_door]`."""
+    t = rule.target.get("type")
+    return tuple(t) if isinstance(t, (list, tuple)) else (t,)
+
+
 def _targets(rule: Rule, design: Design) -> list[Element | None]:
     t = rule.target
-    if t.get("type") == "ship":
+    if target_types(rule) == ("ship",):
         return [None]
+    types = target_types(rule)
     out = []
     for e in design.elements:
-        if e.type != t.get("type"):
+        if e.type not in types:
             continue
         when = t.get("when") or {}
         if all(e.props.get(k) == v for k, v in when.items()):
@@ -244,7 +251,68 @@ def _value(rule: Rule, el: Element | None, ctx: _Ctx) -> tuple[str | None, str]:
         v = el.geom(prop[5:]) if el else None
         return (f"{v:g} m" if v is not None else None), "measured from the 3D geometry"
     v = el.props.get(prop) if el else None
+    if v is None and el:                       # the same physical thing under another name (a door's sill is its threshold)
+        for alias in SAME_THING.get(prop, ()):
+            if el.props.get(alias) is not None:
+                return str(el.props[alias]), f"from the design data ({alias.replace('_', ' ')})"
     return (None if v is None else str(v)), "from the design data"
+
+
+# Properties that are one physical thing, so rules about either apply to it (and can conflict).
+SAME_THING = {"threshold_height": ("sill_height",), "sill_height": ("threshold_height",)}
+PHYSICAL = {"threshold_height": "sill / threshold height", "sill_height": "sill / threshold height"}
+CONFLICT_WAYS_OUT = (
+    "RuleTrace does not decide which rule wins. Options: (1) change the design so both are met, e.g. a different "
+    "arrangement on one side of the opening or another route that needn't meet one of the rules; (2) precedence: mandatory "
+    "flag-state rules (SOLAS, Load Line) normally come before guidance and owner requirements; confirm with the flag "
+    "Administration; (3) ask the flag Administration / class to accept an equivalent arrangement (SOLAS reg. I/5, Load "
+    "Line Article 8). Record the decision in the engineer review; it needs a second person's approval.")
+
+
+def _bound(required: str):
+    """'at least 380 mm' -> ('>=', base value, dimension, text); None when it isn't a fixed limit."""
+    from vartija_core.quantities import QuantityError, parse_requirement
+    try:
+        op, q = parse_requirement(str(required))
+    except QuantityError:
+        return None
+    op = {">": ">=", "<": "<="}.get(op, op)
+    return (op, q.base_value, q.dimension, str(required)) if op in {">=", "<="} and q.dimension != "dimensionless" else None
+
+
+def find_conflicts(findings: list[dict], rules_by_id: dict) -> list[dict]:
+    """Parts where two applicable rules set limits that no single value can meet (e.g. sill >= 380 mm and <= 13 mm)."""
+    groups: dict[tuple, list[dict]] = {}
+    for f in findings:
+        if f.get("element_id") and f.get("property") and f.get("required"):
+            groups.setdefault((f["element_id"], PHYSICAL.get(f["property"], f["property"])), []).append(f)
+    out = []
+    for (eid, what), fs in groups.items():
+        for i, a in enumerate(fs):
+            for b in fs[i + 1:]:
+                if a["rule_id"] == b["rule_id"]:
+                    continue
+                ba, bb = _bound(a["required"]), _bound(b["required"])
+                if not ba or not bb or ba[2] != bb[2] or ba[0] == bb[0]:
+                    continue
+                lo, hi = (ba, bb) if ba[0] == ">=" else (bb, ba)
+                if lo[1] <= hi[1] * (1 + 1e-9):
+                    continue
+                low_f, high_f = (a, b) if lo is ba else (b, a)
+                ids = sorted([a["rule_id"], b["rule_id"]])
+                out.append({
+                    "rule_id": f"CONFLICT-{ids[0]}-{ids[1]}", "title": f"Two regulations conflict on the {what}",
+                    "regime": "Conflict between regulations", "ref": f"{low_f['ref']} vs {high_f['ref']}",
+                    "quote": "", "source_url": "", "verified": True, "severity": "major",
+                    "why_rule": (f"{low_f['regime']} {low_f['ref']} needs {lo[3]}; {high_f['regime']} {high_f['ref']} needs "
+                                 f"{hi[3]}. No single value meets both, so fixing one breaks the other."),
+                    "property": a["property"], "element_id": eid, "element_name": a["element_name"],
+                    "element_type": a["element_type"], "deck": a.get("deck", ""), "zone": a.get("zone", ""), "box": a.get("box"),
+                    "highlight": [], "status": "fail", "required": f"{lo[3]} ({low_f['regime']}) and {hi[3]} ({high_f['regime']})",
+                    "actual": a.get("actual"), "measured": a.get("measured", ""),
+                    "message": f"Conflict: {low_f['regime']} needs {lo[3]}, {high_f['regime']} needs {hi[3]}. No design can meet both.",
+                    "fix": CONFLICT_WAYS_OUT, "conflicting_rules": [low_f["rule_id"], high_f["rule_id"]]})
+    return out
 
 
 _OP_WORDS = [(">=", "at least"), ("<=", "at most"), (">", "more than"), ("<", "less than"), ("==", "exactly")]
@@ -328,6 +396,7 @@ def check_design(design: Design, rules: list[Rule] | None = None) -> dict:
         applied.append({"rule_id": r.id, "title": r.title, "regime": r.regime, "ref": r.ref, "reasons": why,
                         "checked": len(fs)})
         findings.extend(fs)
+    findings.extend(find_conflicts(findings, {r.id: r for r in rules}))
     findings.sort(key=lambda f: (STATUS_ORDER[f["status"]], f["regime"], f["rule_id"], f["element_id"] or ""))
     counts = {s: sum(1 for f in findings if f["status"] == s) for s in STATUS_ORDER}
     return {"ship": design.to_dict()["ship"], "title": design.title, "counts": counts, "findings": findings,
