@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RuleTrace Â· dashboard</title>
+<title>RuleTrace · dashboard</title>
 <style>
 :root{--bg:#f4f6f8;--card:#fff;--ink:#16202a;--muted:#5d6975;--line:#dde3e8;--navy:#0b2545;--teal:#138a8a;
 --fail:#d64545;--warn:#d88b16;--unknown:#6b7c93;--pass:#2e8b57;--r:10px}
@@ -69,13 +69,13 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{
   <a href="/ruletrace">3D design check</a>
   <a href="/ruletrace/rulesets/page">New rule sets</a>
 </header>
-<main id="main"><div class="empty">Loadingâ€¦</div></main>
+<main id="main"><div class="empty">Loading…</div></main>
 <div id="toast" class="toast"></div>
 <script>
-const PEOPLE = [{label:"Mikko Â· design engineer", user:"mikko", roles:"engineer"},
-                {label:"Aino Â· compliance lead (approver)", user:"aino", roles:"ciso"},
-                {label:"Sanna Â· CEO", user:"sanna", roles:"ceo"},
-                {label:"Ella Â· admin", user:"ella", roles:"admin"}];
+const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
+                {label:"Aino · compliance lead (approver)", user:"aino", roles:"ciso"},
+                {label:"Sanna · CEO", user:"sanna", roles:"ceo"},
+                {label:"Ella · admin", user:"ella", roles:"admin"}];
 const PLAIN = {"SOLAS":"Fire safety and escape (SOLAS)", "SOLAS / FSS Code":"Escape stairs (FSS Code)", "COLREG":"Navigation lights (COLREG)",
   "MARPOL":"Engine emissions (MARPOL)", "MLC 2006":"Crew accommodation (MLC)", "PVAG":"Accessibility, US ports (PVAG)",
   "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency", "Load Line":"Deck openings and rails (Load Line)", "SOLAS II-1":"Hull subdivision (SOLAS II-1)", "Tonnage Convention":"Gross tonnage (Tonnage Convention)", "Conflict between regulations":"Conflicts between regulations"};
@@ -120,12 +120,12 @@ async function load(){
   S.view === "engineer" ? engineerView() : executiveView();
 }
 
-const reviewPill = rv => !rv ? "" : `<span class="pill ${{approved:"ready", prepared:"review", rejected:"fix"}[rv.stage] || "info"}">${esc(rv.stage === "approved" ? "âœ“ " + rv.label : rv.label)}</span>`;
+const reviewPill = rv => !rv ? "" : `<span class="pill ${{approved:"ready", prepared:"review", rejected:"fix"}[rv.stage] || "info"}">${esc(rv.stage === "approved" ? "✓ " + rv.label : rv.label)}</span>`;
 // ---------------- engineer view ----------------
 function engineerView(){
   const t = S.totals, c = S.chain;
   root().innerHTML = `
-  <div class="hero" style="font-size:19px">${t.designs} design${t.designs===1?"":"s"} checked Â· <span style="color:var(--fail)">${t.open_fail} problem${t.open_fail===1?"":"s"} to fix</span></div>
+  <div class="hero" style="font-size:19px">${t.designs} design${t.designs===1?"":"s"} checked · <span style="color:var(--fail)">${t.open_fail} problem${t.open_fail===1?"":"s"} to fix</span></div>
   <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
     <div class="kpi"><b class="c-fail">${t.open_fail}</b><span>problems to fix (a rule is broken)</span></div>
     <div class="kpi"><b class="c-unknown">${t.open_unknown}</b><span>can't check yet (the design is missing a value)</span></div>
@@ -140,15 +140,15 @@ function engineerView(){
         <td class="num c-fail"><b>${d.counts.fail||0}</b></td>
         <td class="small">${reviewPill(d.review)}</td>
         <td class="small">${esc(when(d.checked_at))}<div class="muted">by ${esc(d.checked_by)}</div></td>
-        <td class="small" style="white-space:nowrap;text-align:right">${d.fails.length ? `<a href="#" data-x="${i}">Show problems</a> Â· ` : ""}${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}"><b>Open in 3D</b></a> Â· <a href="#" data-rm="${esc(d.design_id)}" class="muted">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
-      <tr class="sub" id="x${i}" style="display:none"><td colspan="6">${d.fails.map(f => `<div><span class="c-fail">â—</span> <b>${esc(f.title)}</b> <span class="muted">Â· ${esc(f.ref)}</span></div>`).join("")}</td></tr>`).join("")}
+        <td class="small" style="white-space:nowrap;text-align:right">${d.fails.length ? `<a href="#" data-x="${i}">Show problems</a> · ` : ""}${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}"><b>Open in 3D</b></a> · <a href="#" data-rm="${esc(d.design_id)}" class="muted">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
+      <tr class="sub" id="x${i}" style="display:none"><td colspan="6">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)}</span></div>`).join("")}</td></tr>`).join("")}
     </tbody></table>
     ${S.totals.removed ? `<div class="small muted" style="margin-top:6px">${S.totals.removed} removed design${S.totals.removed > 1 ? "s are" : " is"} not counted here; their checks stay in the check history.</div>` : ""}
   </div>
   <div class="grid g2">
     <div class="card"><h2>Which rules are broken most</h2>${bars()}</div>
     <div class="card"><h2>Check history</h2>
-      <div class="chain ${c.ok ? "ok" : "bad"}"><b>${c.ok ? "âœ“ Nothing has been changed" : "âœ— The history has been changed"}</b>
+      <div class="chain ${c.ok ? "ok" : "bad"}"><b>${c.ok ? "✓ Nothing has been changed" : "✗ The history has been changed"}</b>
         <span class="small">${c.ok ? `all ${c.entries} saved records are intact` : "at record #" + c.first_broken_seq}</span></div>
       ${S.activity.slice(0,6).map(a => `<div class="act" style="grid-template-columns:1fr auto"><span><b>${esc(a.actor)}</b> checked ${esc(a.file)}<br><span class="small muted">${esc(when(a.ts))}</span></span>
         <span class="small c-fail">${a.counts.fail||0} problems</span></div>`).join("")}
@@ -170,7 +170,7 @@ function engineerView(){
 function bars(){
   if (!S.regimes.length) return `<div class="muted">No rule is broken.</div>`;
   const max = Math.max(...S.regimes.map(g => g.fail));
-  return S.regimes.map(g => `<div class="bar" title="${esc(g.rules.map(r => r.title).join(" Â· "))}"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>`).join("");
+  return S.regimes.map(g => `<div class="bar" title="${esc(g.rules.map(r => r.title).join(" · "))}"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100*g.fail/max}%"></i></span><span class="n">${g.fail}</span></div>`).join("");
 }
 // ---------------- administrator: three tabs on top of the engineer view ----------------
 const TABS = [["org", "Organisation"], ["admin", "Administration"], ["eng", "Engineering"]];
@@ -185,11 +185,11 @@ function adminShell(){
 }
 function adminView(){
   const sy = A.system, llm = sy.llm || {};
-  const find = A.findings.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "âœ“" : x.level === "bad" ? "âœ—" : "!"}</i><span>${esc(x.text)}</span></div>`).join("");
+  const find = A.findings.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "✓" : x.level === "bad" ? "✗" : "!"}</i><span>${esc(x.text)}</span></div>`).join("");
   const roles = `<table><thead><tr><th>Group</th><th>Roles in this group</th><th>What they can do</th></tr></thead><tbody>${A.roles.map(r =>
     `<tr><td><b>${esc(r.label)}</b></td><td>${r.roles.length ? r.roles.map(x => `<span class="chip">${esc(x)}</span>`).join("") : `<span class="muted">none</span>`}</td>
      <td class="small">${r.can.map(c => `<div>${esc(c)}</div>`).join("")}</td></tr>`).join("")}</tbody></table>
-    <div class="small muted" style="margin-top:8px">Administrators: ${A.administrators.map(x => `<span class="chip">${esc(x)}</span>`).join("")} Â· change roles in <span class="mono">ruletrace/access.yaml</span>, then restart the app.</div>`;
+    <div class="small muted" style="margin-top:8px">Administrators: ${A.administrators.map(x => `<span class="chip">${esc(x)}</span>`).join("")} · change roles in <span class="mono">ruletrace/access.yaml</span>, then restart the app.</div>`;
   const byPerson = A.people.length ? stacked(A.people.map(a => ({label: a.actor, sub: "last active " + when(a.last_seen),
       parts: [{label: "Design checks", value: a.checks, color: COL.teal}, {label: "AI helper uses", value: a.ai, color: "#7b6fd0"}]})),
     [{label: "Design checks", color: COL.teal}, {label: "AI helper uses", color: "#7b6fd0"}]) : `<div class="muted">No activity recorded yet.</div>`;
@@ -266,7 +266,7 @@ function approvalCard(a){
   if (!a || !a.total) return `<div class="card"><h2>Human approval</h2><div class="muted">No design has been checked yet.</div></div>`;
   const chart = donut(a.stages.map(g => ({label: g.label, value: g.count, color: STAGE_COL[g.stage]})), `${a.approved}/${a.total}`, "approved");
   const wait = a.awaiting.length ? `<h2 style="margin-top:16px">Waiting for an approver (${a.awaiting.length})</h2>${a.awaiting.map(w =>
-      `<div class="ship"><b style="font-weight:500">${esc(w.ship)}<div class="small muted" style="font-weight:400">${esc(w.title)} Â· prepared by ${esc(w.prepared_by || "an engineer")}</div></b>
+      `<div class="ship"><b style="font-weight:500">${esc(w.ship)}<div class="small muted" style="font-weight:400">${esc(w.title)} · prepared by ${esc(w.prepared_by || "an engineer")}</div></b>
        <a class="small" href="/ruletrace#design=${encodeURIComponent(w.design_id)}">Open to review</a></div>`).join("")}`
     : `<div class="small muted" style="margin-top:12px">Nothing is waiting for an approver.</div>`;
   return `<div class="card"><h2>Human approval</h2>${chart}${wait}
@@ -274,8 +274,8 @@ function approvalCard(a){
 }
 function complianceView(){
   const k = P.kpis, r = P.rating, ai = P.ai, rp = P.rule_pack, c = P.chain || {};
-  const pct = v => v == null ? "â€“" : v + "%";
-  const sig = P.signals.length ? P.signals.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "âœ“" : x.level === "bad" ? "âœ—" : "!"}</i><span>${esc(x.text)}</span></div>`).join("")
+  const pct = v => v == null ? "–" : v + "%";
+  const sig = P.signals.length ? P.signals.map(x => `<div class="sig ${x.level}"><i>${x.level === "good" ? "✓" : x.level === "bad" ? "✗" : "!"}</i><span>${esc(x.text)}</span></div>`).join("")
     : `<div class="muted">Nothing needs attention.</div>`;
   const ships = P.ships.length ? `<table><thead><tr><th>Ship</th><th>Design</th><th>Result</th><th class="num">Major</th><th class="num">Minor</th><th class="num">Can't check</th><th>Checked</th></tr></thead><tbody>${
     P.ships.map(d => `<tr><td><b>${esc(d.ship)}</b></td><td class="small muted">${esc(d.title)}</td><td><span class="pill ${esc(d.readiness)}">${esc(d.readiness_label)}</span></td>
@@ -302,7 +302,7 @@ function complianceView(){
   const regimeMax = Math.max(1, ...P.regimes.map(g => g.open_fail));
   const byRegime = P.regimes.some(g => g.open_fail) ? P.regimes.filter(g => g.open_fail).map(g => `<div class="bar" title="${g.designs_affected} design(s) affected"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100 * g.open_fail / regimeMax}%"></i></span><span class="n">${g.open_fail}</span></div>`).join("") : `<div class="muted">No open issues in any regulation.</div>`;
   const verifiedBars = P.regimes.map(g => `<div class="bar" title="${g.verified} of ${g.rules} rules verified"><span class="l">${esc(plain(g.regime))}</span><span class="t"><i style="width:${100 * g.verified / g.rules}%;background:${g.verified < g.rules ? "var(--warn)" : "var(--pass)"}"></i></span><span class="n">${g.verified}/${g.rules}</span></div>`).join("");
-  const trendChart = lineChart(P.trend.map(t => ({y: t.fail, tip: `${t.file || "check"} Â· ${t.fail} to fix Â· ${when(t.ts)}`})), "Problems found by each check, oldest first");
+  const trendChart = lineChart(P.trend.map(t => ({y: t.fail, tip: `${t.file || "check"} · ${t.fail} to fix · ${when(t.ts)}`})), "Problems found by each check, oldest first");
   const aiChart = ai.by_action.some(a => a.count) ? vbars(ai.by_action.filter(a => a.count).map(a => ({label: a.label.split(" ")[0], value: a.count, color: COL.teal})), "AI helper use") : "";
   const regimes = `<table><thead><tr><th>Rules from</th><th class="num">Rules</th><th class="num">Verified</th><th class="num">Open issues</th><th class="num">Designs affected</th></tr></thead><tbody>${
     P.regimes.map(g => `<tr><td>${esc(plain(g.regime))}</td><td class="num">${g.rules}</td><td class="num ${g.verified < g.rules ? "c-warn" : ""}">${g.verified}</td>
@@ -310,7 +310,7 @@ function complianceView(){
   const aiRows = ai.by_action.filter(a => a.count).map(a => `<div class="ship"><b style="font-weight:500">${esc(a.label)}</b><span>${a.count}</span></div>`).join("")
     || `<div class="muted">The AI helpers have not been used yet.</div>`;
   root().innerHTML = `
-  <div class="hero" style="margin-bottom:2px">Good ${greeting()}, ${esc(cap(P.me.name))} ðŸ‘‹</div>
+  <div class="hero" style="margin-bottom:2px">Good ${greeting()}, ${esc(cap(P.me.name))} 👋</div>
   <div class="sub2">Compliance posture across every ship design checked in RuleTrace.</div>
   <div class="kpis">
     <div class="kpi"><b>${k.designs}</b><span>ship designs checked<br>${k.checks_run} check${k.checks_run === 1 ? "" : "s"} run</span></div>
@@ -374,7 +374,7 @@ function executiveView(){
     <div class="card"><h2>Money saved by finding issues early</h2><div class="big" id="avoid"></div><div class="small muted" id="avoidTxt"></div></div>
     <div class="card"><h2>Engineer time saved</h2><div class="big" id="hours"></div><div class="small muted" id="hoursTxt"></div></div>
     <div class="card"><h2>Approved by engineers</h2><div class="big">${t.approved} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
-      <div class="small muted">${t.awaiting_approval} waiting for a second signature Â· ${ready} with no open problems. Nothing counts as approved until two people have signed it off.</div></div>
+      <div class="small muted">${t.awaiting_approval} waiting for a second signature · ${ready} with no open problems. Nothing counts as approved until two people have signed it off.</div></div>
   </div>
   <div class="grid g2">
     <div class="card"><h2>Ships</h2>${S.designs.map(d => `<div class="ship"><b>${esc(d.ship || d.title)}<div class="small muted" style="font-weight:400">${esc(d.title)}</div></b>
