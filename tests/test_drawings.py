@@ -81,3 +81,21 @@ def test_dimension_tables_from_other_yards():
              w("DEPTH", 0, 111), w("TO", 40, 111), w("9,10", 300, 111),
              w("DEPTH", 0, 122), w("TO", 40, 122), w("3.DECK", 60, 122), w("11,80", 300, 122)]
     assert _particulars_table(words)[1] == {"1 DECK": 6.3, "3 DECK": 11.8}
+
+
+def test_change_a_cabin_on_a_drawing(tmp_path):
+    """The challenger's test: change a measurement in a design read from a drawing and re-check it."""
+    import json
+    from ruletrace.engine import check_design
+    from ruletrace.model import design_from_dict
+    from ruletrace.revisions import Change, apply_changes, compare_results
+    pytest.importorskip("pypdfium2")
+    d = design_from_ga_pdf(SAMPLES / "demo_ga_drawing.pdf")
+    raw = json.loads(json.dumps(d.to_dict()))
+    raw["ship"]["keel_laid"] = "2025-06-01"
+    cab = next(e for e in raw["elements"] if e["type"] == "cabin" and e["props"].get("berths") == 1
+               and float(str(e["props"]["floor_area"]).split()[0]) >= 7)
+    new, log = apply_changes(raw, [Change(element_id=cab["id"], prop="floor_area", value="5 m2")], {})
+    assert log[0]["after"] == "5 m2" and next(e for e in new["elements"] if e["id"] == cab["id"])["box"][3] == round(5 ** 0.5, 2)
+    c = compare_results(check_design(design_from_dict(raw)), check_design(design_from_dict(new)))
+    assert [(x["rule_id"], x["element_id"]) for x in c["broken"]] == [("MLC-A3.1-9-SINGLE-CABIN-AREA", cab["id"])]

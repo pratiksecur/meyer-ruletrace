@@ -67,7 +67,7 @@ svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif}
 </main>
 <div id="toast" class="toast"></div>
 <script>
-const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"}, {label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"}, {label:"Aino · compliance lead (approver)", user:"aino", roles:"ciso"},
                 {label:"Ella · admin", user:"ella", roles:"admin"}];
 const KIND = {ok:"Works", flaw:"Flaw", warn:"Weaker", gap:"Can't test", info:"Duplicate"};
 const $ = s => document.querySelector(s);
@@ -75,10 +75,11 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 PEOPLE.forEach((p,i) => $("#who").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p.label)}</option>`));
 $("#who").value = store.get("ruletrace.rs.who") || "0";
-$("#who").onchange = () => { store.set("ruletrace.rs.who", $("#who").value); loadList(); };
+$("#who").onchange = () => { store.set("ruletrace.rs.who", $("#who").value); loadList(); if (current) open(current); };
 const headers = () => { const p = PEOPLE[+$("#who").value]; return {"X-User":p.user, "X-Roles":p.roles, "X-User-Kind":"human"}; };
 async function api(path, opts={}){
-  const r = await fetch(path, {...opts, headers: headers()});
+  const h = opts.json ? {...headers(), "Content-Type": "application/json"} : headers();
+  const r = await fetch(path, {method: opts.method, body: opts.body, headers: h});
   const d = r.headers.get("content-type")?.includes("json") ? await r.json().catch(() => ({})) : await r.text();
   if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `HTTP ${r.status}`);
   return d;
@@ -97,8 +98,9 @@ async function loadList(){
 async function open(id){ busy(true); try { show(await api(`/ruletrace/rulesets/${id}`)); } catch(e){ toast(e.message, true) } busy(false); }
 function busy(on){ $("#up").disabled = on; $("#up").textContent = on ? "Reading…" : "Read and analyse"; }
 function show(r){
-  R = r; current = r.id; filter = "all"; loadList(); render();
-  $("#report").scrollIntoView({behavior:"smooth", block:"start"});
+  const same = R && R.id === r.id;
+  R = r; current = r.id; if (!same) filter = "all"; loadList(); render();
+  if (!same) $("#report").scrollIntoView({behavior:"smooth", block:"start"});
 }
 const COL = {ok:"var(--pass)", flaw:"var(--fail)", warn:"var(--warn)", gap:"var(--unknown)", info:"#8da9c4"};
 const ORDER = ["flaw","warn","info","gap","ok"];
@@ -173,6 +175,41 @@ function compareRow(v){
     ${line("New rule", v.limit, COL[v.kind], true, v.ref)}
     <div class="small" style="margin-top:4px">${say}${more ? ` <span class="muted">(Also checked today by ${more} other rule${more > 1 ? "s" : ""}; the strictest is shown.)</span>` : ""}</div></div>`;
 }
+// ---------- human approval: an engineer approves or rejects each draft rule; a second person puts them into use ----------
+let rejecting = null;
+function ruleReview(v){
+  if (!v.id || R.activation) return v.review ? `<div class="small" style="margin-top:6px"><b>${v.review.decision === "approve" ? "✓ Approved" : "✗ Rejected"}</b> by ${esc(v.review.by)}${v.review.reason ? `: "${esc(v.review.reason)}"` : ""}</div>` : "";
+  if (v.review) return `<div class="small" style="margin-top:6px;padding:6px 8px;border-radius:7px;background:${v.review.decision === "approve" ? "#e8f5ee" : "#f1f3f5"}">
+      <b>${v.review.decision === "approve" ? "✓ Approved" : "✗ Rejected"}</b> by ${esc(v.review.by)}${v.review.reason ? `: "${esc(v.review.reason)}"` : ""}
+      <a href="#" data-rclear="${esc(v.id)}">change</a></div>`;
+  if (rejecting === v.id) return `<div style="margin-top:6px"><textarea id="rjWhy" rows="2" style="width:100%;font:inherit;font-size:12px" placeholder="Why is it rejected?"></textarea>
+      <button class="primary" data-rjsave="${esc(v.id)}">Save rejection</button> <button data-rjcancel="1">Cancel</button></div>`;
+  return `<div style="margin-top:6px"><button class="primary" data-rok="${esc(v.id)}" style="font-size:12px;padding:3px 9px">Approve rule</button>
+      <button data-rno="${esc(v.id)}" style="font-size:12px;padding:3px 9px">Reject…</button>
+      ${v.kind === "flaw" ? `<span class="small c-fail"> has a flaw: it can't go live until fixed</span>` : ""}</div>`;
+}
+function approvalCard(r){
+  const all = r.verdicts.filter(v => v.id), rv = r.reviews || {}, ok = all.filter(v => rv[v.id]?.decision === "approve").length,
+        no = all.filter(v => rv[v.id]?.decision === "reject").length, me = PEOPLE[+$("#who").value].user;
+  if (r.activation) return `<div style="color:var(--pass);font-weight:600">✓ In use: ${r.activation.rules} approved rule(s), put into use by ${esc(r.activation.by)}</div>
+    <div class="small muted">They now run on every design check, next to SOLAS & co.</div>
+    ${r.can_approve ? `<button id="deact" style="margin-top:8px">Take out of use</button>` : ""}`;
+  const approvers = new Set(Object.values(rv).filter(x => x.decision === "approve").map(x => x.by));
+  return `<div class="small">${ok} approved · ${no} rejected · ${all.length - ok - no} not reviewed, of ${all.length} draft rules</div>
+    ${r.can_approve && !approvers.has(me) ? `<button id="act" class="primary" style="margin-top:8px" ${ok ? "" : "disabled"}>Put ${ok} approved rule(s) into use</button>`
+      : `<div class="small muted" style="margin-top:6px">${r.can_approve ? "You approved rules here, so someone else must put them into use (four-eyes)." : "A compliance lead (e.g. Aino) puts approved rules into use."}</div>`}`;
+}
+function wireApproval(r){
+  const post = (path, body) => async ev => { ev.preventDefault(); try { show(await api(path, {method:"POST", headers2: true, body: JSON.stringify(body), json: true})); } catch(e){ toast(e.message, true) } };
+  document.querySelectorAll("[data-rok]").forEach(b => b.onclick = post(`/ruletrace/rulesets/${r.id}/rules/${encodeURIComponent(b.dataset.rok)}/review`, {decision:"approve"}));
+  document.querySelectorAll("[data-rclear]").forEach(b => b.onclick = post(`/ruletrace/rulesets/${r.id}/rules/${encodeURIComponent(b.dataset.rclear)}/review`, {decision:"clear"}));
+  document.querySelectorAll("[data-rno]").forEach(b => b.onclick = ev => { ev.preventDefault(); rejecting = b.dataset.rno; render(); });
+  document.querySelectorAll("[data-rjcancel]").forEach(b => b.onclick = () => { rejecting = null; render(); });
+  document.querySelectorAll("[data-rjsave]").forEach(b => b.onclick = ev => { const why = $("#rjWhy").value; rejecting = null;
+    post(`/ruletrace/rulesets/${r.id}/rules/${encodeURIComponent(b.dataset.rjsave)}/review`, {decision:"reject", reason: why})(ev); });
+  if ($("#act")) $("#act").onclick = post(`/ruletrace/rulesets/${r.id}/activate`, {});
+  if ($("#deact")) $("#deact").onclick = post(`/ruletrace/rulesets/${r.id}/deactivate`, {});
+}
 function render(){
   const r = R, c = r.counts, state = c.flaw ? "flaw" : (c.gap || c.warn ? "gap" : "ok");
   const vs = r.verdicts.filter(v => filter === "all" || v.kind === filter);
@@ -196,6 +233,7 @@ function render(){
         ${v.quote ? `<div class="quote">"${esc(v.quote)}"</div>` : ""}
         ${v.hides && v.hides.length ? `<div class="small c-fail">Would pass: ${v.hides.map(h => esc(h.element) + " (" + esc(h.design) + ")").join("; ")}</div>` : ""}
         ${v.new_issues && v.new_issues.length ? `<div class="small c-warn">New issues: ${v.new_issues.map(h => esc(h.element) + " (" + esc(h.design) + ")").join("; ")}</div>` : ""}
+        ${ruleReview(v)}
       </div>`).join("") : `<div class="muted">Nothing in this filter.</div>`}
     </div>
     <div>
@@ -210,13 +248,15 @@ function render(){
           <div class="quote">"${esc(m.text)}"</div></div>`).join("") : `<div class="muted">None: every requirement became a check.</div>`}
         ${(r.notes||[]).map(n => `<div class="small muted">${esc(n)}</div>`).join("")}
       </div>
+      <div class="card"><h2>Engineer approval</h2>${approvalCard(r)}</div>
       <div class="card"><h2>Next step</h2>
-        <div class="small" style="margin-bottom:8px">Fix the flaws in the source document, re-upload it, then check each draft rule against the official text before it joins the rule pack.</div>
+        <div class="small" style="margin-bottom:8px">Fix the flaws in the source document and re-upload it. Each draft rule needs an engineer's approval after checking it against the official text, and a second person puts the approved rules into use.</div>
         <button id="yaml">Download draft rules (YAML)</button> <button id="del">Remove this rule set</button>
       </div>
     </div>
   </div>`;
   document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter = b.dataset.f; render(); });
+  wireApproval(r);
   $("#yaml").onclick = async () => { try { const t = await api(`/ruletrace/rulesets/${r.id}/yaml`), a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([t], {type:"text/yaml"})); a.download = `${r.name.replace(/\W+/g, "_")}_draft_rules.yaml`; a.click(); } catch(e){ toast(e.message, true) } };
   $("#del").onclick = async () => { if (!confirm("Remove this rule set? Its analyses stay in the audit record.")) return;

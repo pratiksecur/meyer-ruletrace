@@ -11,7 +11,8 @@
     "keel_laid": "2026-03-01",
     "flag": "FI",
     "operating_areas": [],
-    "notes": "Synthetic. Planted Load Line and SOLAS II-1 issues: collision bulkhead, double bottom, ventilator, air pipe, door sill, guard rail."
+    "notes": "Synthetic. Planted Load Line and SOLAS II-1 issues: collision bulkhead, double bottom, ventilator, air pipe, door sill, guard rail; stated gross tonnage (9,000) is lower than the 9,881 GT its enclosed volume gives.",
+    "enclosed_volume_m3": 34000
   },
   "elements": [
     {
@@ -233,6 +234,11 @@
     {
       "rule_id": "LL-25-GUARD-RAIL-LOWEST-OPENING",
       "element_id": "CK-GR1",
+      "status": "fail"
+    },
+    {
+      "rule_id": "ITC69-REG3-GROSS-TONNAGE-LOW",
+      "element_id": null,
       "status": "fail"
     }
   ]

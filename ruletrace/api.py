@@ -252,7 +252,7 @@ def make_router(app) -> APIRouter:
         d = rec["design"]
         overrides = (body.ship_overrides if body else {}) or {}
         allowed = {"operating_areas", "keel_laid", "passengers", "ship_type", "length_m", "breadth_m",
-                   "gross_tonnage", "flag"}
+                   "gross_tonnage", "flag", "enclosed_volume_m3"}
         bad = set(overrides) - allowed
         if bad:
             raise HTTPException(400, f"cannot override {sorted(bad)}")
@@ -280,5 +280,11 @@ def make_router(app) -> APIRouter:
 
     from .rulesets_api import add_ruleset_routes  # proposed rule sets: read a regulation document, analyse it
     add_ruleset_routes(app, router, engineer, store)
+
+    from .revisions import add_revision_routes  # compare two revisions of a design
+    add_revision_routes(app, router, engineer, _path)
+
+    from .reviews import add_review_routes  # human review of findings and four-eyes sign-off
+    add_review_routes(app, router, engineer, _path)
 
     return router

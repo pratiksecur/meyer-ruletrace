@@ -297,7 +297,8 @@ def _req_text(r: Rule) -> str:
 
 def analyze(drafts: list[dict], designs: list, current: list[Rule] | None = None) -> dict:
     """Run the proposed rules on the designs next to the current rule pack and give each a verdict."""
-    current = current if current is not None else load_rules()
+    ids = {d.get("id") for d in drafts}
+    current = [r for r in (current if current is not None else load_rules()) if r.id not in ids]  # not against itself once active
     loaded, broken = [], []
     for d in drafts:
         r, err = _load_one(d)

@@ -3,7 +3,7 @@
 **Since AI Hackathon 2026 · Meyer Turku challenge: "Automated class and regulatory compliance checking"**
 
 RuleTrace checks a ship design (an IFC 3D model or a structured design file) against a curated
-set of rules from SOLAS, the FSS Code, the Load Line Convention, COLREG, MARPOL Annex VI, MLC, PVAG and ADA. It shows each
+set of rules from SOLAS, the FSS Code, the Load Line Convention, the Tonnage Convention, COLREG, MARPOL Annex VI, MLC, PVAG and ADA. It shows each
 problem **on the 3D model** and says **why** it is not compliant: the rule, its paragraph, the quoted
 text, what was required, what the design has, and how to fix it.
 
@@ -41,7 +41,7 @@ Also built in:
 - `ruletrace/dashboard.py` + `static/dashboard.html`: engineer and executive dashboard, built from the recorded design checks
 - `ruletrace/rulesets.py` + `rulesets_api.py` + `static/rulesets.html`: read a regulation document into draft rules and analyse them against the designs and the current rules
 - `ruletrace/engine.py`: applicability, safe expressions, checks, findings
-- `ruletrace/rules/*.yaml`: the rule pack (33 rules: SOLAS/FSS fire and escape, SOLAS II-1 collision bulkhead and double bottom, Load Line deck openings and guard rails, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
+- `ruletrace/rules/*.yaml`: the rule pack (35 rules: Tonnage Convention gross tonnage from the enclosed volume, SOLAS/FSS fire and escape, SOLAS II-1 collision bulkhead and double bottom, Load Line deck openings and guard rails, COLREG lights, PVAG/ADA, MARPOL VI Tier III, MLC 2006 crew accommodation, drawing consistency)
 - `ruletrace/api.py`: HTTP API; `ruletrace/app.py`: adds it to the Vartija core app
 - `ruletrace/static/index.html`: 3D viewer (three.js, bundled so it works offline)
 - Built on **Vartija core** (prior work; feature freeze at tag `pre-event-2026-11-05`, installed from release `v0.2.0`, which only adds a packaging fix): login and roles, audit hash chain, document sources. RuleTrace uses only Vartija's public API (`create_app`, `Principal`, `current_principal`, `audit.append`, `quantities.parse_quantity` / `check_requirement`, `settings.Settings`).
@@ -136,6 +136,39 @@ planted problems is: `ruletrace/samples/demo_ga_drawing.pdf` (`scripts/make_ga_s
 ```
 `box` = [x, y, z, length, width, height] in metres (x forward from the aft perpendicular, y to starboard from the centreline, z up from the baseline).
 Operating areas: `us_ports`, `north_american_eca`, `us_caribbean_eca`, `baltic_sea`, `north_sea`, `mediterranean`, `canadian_arctic`.
+
+## Human approval: nothing is accepted automatically
+
+- **Every open finding needs an engineer's decision** (right panel, in each finding): *Confirm: must be fixed*, or
+  *Dismiss* with a reason (false finding, doesn't apply, accepted deviation agreed with class, information to
+  follow) and a written explanation. A dismissal without one is refused.
+- **Sign-off, four-eyes:** when every open finding is reviewed, the engineer signs off *as prepared*; a second
+  person with an approver role (`ciso`, `grc_manager`, `admin`, `compliance_lead`, `class_surveyor`) approves it
+  or sends it back with a note. The person who prepared it can't approve it. Signed-off checks are locked until
+  reopened. The dashboard shows each design's review state; the report prints the decisions and both names.
+- **New rules too:** on *New rule sets* an engineer approves or rejects each draft rule (a rejection needs a
+  reason); a second person with an approver role puts the approved rules into use. Rules with a flaw (conflict,
+  weaker than today) can't go live. Active company rules run on every check; *Take out of use* removes them.
+- Every decision is written to the audit chain (`finding.reviewed`, `check.prepared`, `check.approved`,
+  `rule.reviewed`, `ruleset.activated`) with the design's fingerprint.
+
+## Comparing revisions and the compliance report
+
+- **Compare two revisions** (left panel, *Compare two revisions*): pick the older and the newer design, or *Try it:
+  the cruise ship before and after fixes*. RuleTrace checks both with the same rules and lists what was **fixed**,
+  what is **still open**, and what the change **broke**, plus every part whose values changed. The demo shows a
+  knock-on effect: splitting a fire zone fixes the 48 m limit but makes the next zone longer than 40 m.
+  Parts are matched by ID, so keep IDs stable between revisions (IFC GlobalIds and drawing labels usually are).
+- **Report (PDF)** (above the findings): a printable compliance report of the current check, with every finding,
+  the rule quote, required vs design, the fix, the rules that don't apply and why, the design and rule-pack
+  fingerprints, the check-history entry, and sign-off boxes. Use the browser's *Save as PDF*.
+
+## Demo start (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-demo.ps1        # clean start on port 8002, opens the browser
+powershell -ExecutionPolicy Bypass -File .\start-demo.ps1 -Keep  # keep the designs and check history
+```
 
 ## New rule sets: will they work?
 

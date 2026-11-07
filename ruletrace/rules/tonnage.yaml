@@ -1,0 +1,32 @@
+# International Convention on Tonnage Measurement of Ships, 1969 (ITC 69). Gross tonnage decides which other
+# rules apply (MLC cabin-size bands, SOLAS and MARPOL thresholds) and what the ship pays in dues, so a stated
+# GT that doesn't match the volume makes the wrong rules apply. The check needs the ship profile's
+# `enclosed_volume_m3` (moulded volume of all enclosed spaces, m3); without it the rule is listed as not applicable.
+
+- id: ITC69-REG3-GROSS-TONNAGE-LOW
+  title: Stated gross tonnage not below the value from the enclosed volume
+  regime: Tonnage Convention
+  ref: "ITC 1969 Annex I, reg. 3"
+  quote: "GT=K1 V, in which V=total volume of all enclosed spaces in cubic meters and K1=0.2+0.02 log10 V"
+  source_url: https://chanrobles.com/usa/uslaws/cfr/title46/46-2.0.1.3.25.2.php
+  verified: true
+  applies_if: {enclosed_volume_given: true}
+  target: {type: ship}
+  check: {actual_expr: "{ship.gross_tonnage}", requirement_expr: "at least {round(0.99 * tonnage_gt(ship.enclosed_volume_m3))}"}
+  severity: major
+  why: GT is worked out from the enclosed volume. A stated GT more than 1% too low can put the ship under the wrong (lighter) rules and dues.
+  fix: Recalculate GT = (0.2 + 0.02 log10 V) x V from the current enclosed volume and update the ship profile, then re-check the GT-dependent rules.
+
+- id: ITC69-REG3-GROSS-TONNAGE-HIGH
+  title: Stated gross tonnage not above the value from the enclosed volume
+  regime: Tonnage Convention
+  ref: "ITC 1969 Annex I, reg. 3"
+  quote: "GT=K1 V, in which V=total volume of all enclosed spaces in cubic meters and K1=0.2+0.02 log10 V"
+  source_url: https://chanrobles.com/usa/uslaws/cfr/title46/46-2.0.1.3.25.2.php
+  verified: true
+  applies_if: {enclosed_volume_given: true}
+  target: {type: ship}
+  check: {actual_expr: "{ship.gross_tonnage}", requirement_expr: "at most {round(1.01 * tonnage_gt(ship.enclosed_volume_m3))}"}
+  severity: minor
+  why: A stated GT more than 1% too high applies stricter rules and higher dues than needed.
+  fix: Recalculate GT from the current enclosed volume and update the ship profile.

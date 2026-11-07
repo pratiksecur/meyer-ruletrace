@@ -35,6 +35,8 @@ class Ship:
     # True when the design covers the whole ship (e.g. a full general arrangement). Rules that check
     # that something EXISTS anywhere on board only run on complete arrangements, never on partial models.
     complete_arrangement: bool = False
+    # Tonnage Convention 1969: the moulded volume of all enclosed spaces, m3 (when the design gives it)
+    enclosed_volume_m3: float = 0.0
 
     @property
     def is_passenger_ship(self) -> bool:
@@ -95,7 +97,8 @@ def _ship(d: dict) -> Ship:
             gross_tonnage=float(d.get("gross_tonnage", 0)),
             keel_laid=date.fromisoformat(kl) if kl else None, flag=str(d.get("flag", "")),
             operating_areas=[str(a) for a in d.get("operating_areas", [])], notes=str(d.get("notes", "")),
-            complete_arrangement=bool(d.get("complete_arrangement", False)))
+            complete_arrangement=bool(d.get("complete_arrangement", False)),
+            enclosed_volume_m3=float(d.get("enclosed_volume_m3", 0) or 0))
     except (KeyError, ValueError, TypeError) as exc:
         raise DesignError(f"invalid ship profile: {exc}") from exc
     if ship.ship_type not in SHIP_TYPES:

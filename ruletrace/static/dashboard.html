@@ -64,12 +64,12 @@ button.primary{background:var(--teal);border-color:var(--teal);color:#fff}a.btn{
 <div id="toast" class="toast"></div>
 <script>
 const PEOPLE = [{label:"Mikko · design engineer", user:"mikko", roles:"engineer"},
-                {label:"Aino · CISO / compliance", user:"aino", roles:"ciso"},
+                {label:"Aino · compliance lead (approver)", user:"aino", roles:"ciso"},
                 {label:"Sanna · CEO", user:"sanna", roles:"ceo"},
                 {label:"Ella · admin", user:"ella", roles:"admin"}];
 const PLAIN = {"SOLAS":"Fire safety and escape (SOLAS)", "SOLAS / FSS Code":"Escape stairs (FSS Code)", "COLREG":"Navigation lights (COLREG)",
   "MARPOL":"Engine emissions (MARPOL)", "MLC 2006":"Crew accommodation (MLC)", "PVAG":"Accessibility, US ports (PVAG)",
-  "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency", "Load Line":"Deck openings and rails (Load Line)", "SOLAS II-1":"Hull subdivision (SOLAS II-1)"};
+  "ADA":"Accessibility, US ports (ADA)", "Drawing consistency":"Drawing consistency", "Load Line":"Deck openings and rails (Load Line)", "SOLAS II-1":"Hull subdivision (SOLAS II-1)", "Tonnage Convention":"Gross tonnage (Tonnage Convention)"};
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
@@ -105,6 +105,7 @@ async function load(){
   S.view === "engineer" ? engineerView() : executiveView();
 }
 
+const reviewPill = rv => !rv ? "" : `<span class="pill ${{approved:"ready", prepared:"review", rejected:"fix"}[rv.stage] || "info"}">${esc(rv.stage === "approved" ? "✓ " + rv.label : rv.label)}</span>`;
 // ---------------- engineer view ----------------
 function engineerView(){
   const t = S.totals, c = S.chain;
@@ -116,15 +117,17 @@ function engineerView(){
     <div class="kpi"><b class="c-warn">${t.open_warn}</b><span>worth a second look</span></div>
   </div>
   <div class="card"><h2>Designs</h2>
-    <table><thead><tr><th>Design</th><th>Result</th><th class="num">Problems</th><th>Checked</th><th></th></tr></thead>
+    <table><thead><tr><th>Design</th><th>Result</th><th class="num">Problems</th><th>Engineer review</th><th>Checked</th><th></th></tr></thead>
     <tbody>${S.designs.map((d,i) => `
       <tr><td><b>${esc(d.title)}</b><div class="small muted">${esc(d.ship)}</div></td>
         <td><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></td>
         <td class="num c-fail"><b>${d.counts.fail||0}</b></td>
+        <td class="small">${reviewPill(d.review)}</td>
         <td class="small">${esc(when(d.checked_at))}<div class="muted">by ${esc(d.checked_by)}</div></td>
         <td class="small" style="white-space:nowrap;text-align:right">${d.fails.length ? `<a href="#" data-x="${i}">Show problems</a> · ` : ""}${d.available ? `<a href="/ruletrace#design=${encodeURIComponent(d.design_id)}"><b>Open in 3D</b></a> · <a href="#" data-rm="${esc(d.design_id)}" class="muted">Remove</a>` : `<span class="muted">removed</span>`}</td></tr>
-      <tr class="sub" id="x${i}" style="display:none"><td colspan="5">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)}</span></div>`).join("")}</td></tr>`).join("")}
+      <tr class="sub" id="x${i}" style="display:none"><td colspan="6">${d.fails.map(f => `<div><span class="c-fail">●</span> <b>${esc(f.title)}</b> <span class="muted">· ${esc(f.ref)}</span></div>`).join("")}</td></tr>`).join("")}
     </tbody></table>
+    ${S.totals.removed ? `<div class="small muted" style="margin-top:6px">${S.totals.removed} removed design${S.totals.removed > 1 ? "s are" : " is"} not counted here; their checks stay in the check history.</div>` : ""}
   </div>
   <div class="grid g2">
     <div class="card"><h2>Which rules are broken most</h2>${bars()}</div>
@@ -229,12 +232,12 @@ function executiveView(){
   <div class="grid g3">
     <div class="card"><h2>Money saved by finding issues early</h2><div class="big" id="avoid"></div><div class="small muted" id="avoidTxt"></div></div>
     <div class="card"><h2>Engineer time saved</h2><div class="big" id="hours"></div><div class="small muted" id="hoursTxt"></div></div>
-    <div class="card"><h2>Designs ready to go</h2><div class="big">${ready} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
-      <div class="small muted">${t.designs - ready} need${t.designs - ready === 1 ? "s" : ""} design changes or more information first.</div></div>
+    <div class="card"><h2>Approved by engineers</h2><div class="big">${t.approved} <span class="muted" style="font-size:18px">of ${t.designs}</span></div>
+      <div class="small muted">${t.awaiting_approval} waiting for a second signature · ${ready} with no open problems. Nothing counts as approved until two people have signed it off.</div></div>
   </div>
   <div class="grid g2">
     <div class="card"><h2>Ships</h2>${S.designs.map(d => `<div class="ship"><b>${esc(d.ship || d.title)}<div class="small muted" style="font-weight:400">${esc(d.title)}</div></b>
-      <span class="small">${d.counts.fail ? `${d.counts.fail} to fix` : ""}</span><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span></div>`).join("")}</div>
+      <span class="small">${d.counts.fail ? `${d.counts.fail} to fix` : ""}</span><span class="pill ${d.readiness}">${esc(d.readiness_label)}</span> ${reviewPill(d.review)}</div>`).join("")}</div>
     <div class="card"><h2>Where the issues are</h2>${S.regimes.length ? S.regimes.map(g => `<div class="ship"><b style="font-weight:500">${esc(plain(g.regime))}</b><span class="c-fail">${g.fail}</span></div>`).join("") : `<div class="muted">No open issues.</div>`}</div>
   </div>
   <details class="card assume"><summary><b>How these money figures are estimated</b> <span class="small muted">(example numbers: change them to see the effect)</span></summary><div style="margin-top:10px">

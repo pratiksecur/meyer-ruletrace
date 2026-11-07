@@ -66,3 +66,27 @@ def test_word_and_pdf_documents_are_read(tmp_path):
     c.save()
     rules, _, _ = rs.extract_rules(rs.read_text(pdf), "Spec")
     assert rules[0]["target"]["type"] == "guard_rail"
+
+
+def test_rules_need_engineer_approval_and_second_person_to_go_live(client):
+    AINO = {"X-User": "aino", "X-Roles": "ciso"}
+    r = client.post("/ruletrace/rulesets/sample/demo_owner_spec", headers=ENG).json()
+    rid = r["id"]
+    ok_rule = next(v["id"] for v in r["verdicts"] if v["kind"] == "ok" and v["target"] == "guard_rail")
+    flawed = next(v["id"] for v in r["verdicts"] if v["kind"] == "flaw")
+    assert client.post(f"/ruletrace/rulesets/{rid}/activate", headers=AINO).status_code == 409      # nothing approved yet
+    assert client.post(f"/ruletrace/rulesets/{rid}/rules/{flawed}/review", headers=ENG,
+                       json={"decision": "reject"}).status_code == 400                                # rejection needs a reason
+    client.post(f"/ruletrace/rulesets/{rid}/rules/{ok_rule}/review", headers=ENG, json={"decision": "approve"})
+    client.post(f"/ruletrace/rulesets/{rid}/rules/{flawed}/review", headers=ENG, json={"decision": "approve"})
+    assert client.post(f"/ruletrace/rulesets/{rid}/activate", headers=ENG).status_code == 403        # engineer role can't
+    blocked = client.post(f"/ruletrace/rulesets/{rid}/activate", headers=AINO)
+    assert blocked.status_code == 409 and flawed in blocked.json()["detail"]                        # flawed rules can't go live
+    client.post(f"/ruletrace/rulesets/{rid}/rules/{flawed}/review", headers=ENG,
+                json={"decision": "reject", "reason": "Contradicts PVAG; owner to correct rev. B."})
+    live = client.post(f"/ruletrace/rulesets/{rid}/activate", headers=AINO).json()
+    assert live["activation"]["rules"] == 1
+    assert ok_rule in [x["id"] for x in client.get("/ruletrace/rules", headers=ENG).json()["rules"]]   # now in the pack
+    assert client.delete(f"/ruletrace/rulesets/{rid}", headers=ENG).status_code == 409
+    client.post(f"/ruletrace/rulesets/{rid}/deactivate", headers=AINO)
+    assert ok_rule not in [x["id"] for x in client.get("/ruletrace/rules", headers=ENG).json()["rules"]]
