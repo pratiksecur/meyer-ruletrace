@@ -150,7 +150,20 @@ def gemini_off_reason() -> str:
             else "set GEMINI_API_KEY in .env to read drawings and pictures (optional)")
 # models the user can choose in Ask (Groq free tier and the local Ollama model); never Gemini
 BOT_MODELS = [("groq", "openai/gpt-oss-120b"), ("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"),
-              ("ollama", os.getenv("OLLAMA_MODEL", "llama3.2:3b"))]
+              ("ollama", os.getenv("OLLAMA_MODEL", "qwen3:8b")), ("ollama", "llama3.2:3b")]
+BOT_MODELS = list(dict.fromkeys(BOT_MODELS))
+
+
+def _ollama_installed() -> set[str] | None:
+    """Model tags pulled into the local Ollama, or None if Ollama does not answer."""
+    import httpx
+
+    try:
+        tags = httpx.get(os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/") + "/api/tags",
+                         timeout=2).json().get("models", [])
+        return {t["name"] for t in tags}
+    except Exception:
+        return None
 
 
 def bot_models() -> list[dict]:
@@ -162,13 +175,18 @@ def bot_models() -> list[dict]:
     except (OSError, ValueError):
         pass
     conf = confidential()
+    local = _ollama_installed()
     out = [{"id": "auto", "name": "Automatic (local Ollama)" if conf else "Automatic (Groq, then local Ollama)",
             "ready": True}]
     for prov, model in BOT_MODELS:
         mid = f"{prov}:{model}"
         cloud = prov == "groq"
-        ready = (not conf and bool(os.getenv("GROQ_API_KEY"))) if cloud else True
-        why = "" if ready else ("off in confidential mode" if conf else "no GROQ_API_KEY")
+        if cloud:
+            ready = not conf and bool(os.getenv("GROQ_API_KEY"))
+            why = "" if ready else ("off in confidential mode" if conf else "no GROQ_API_KEY")
+        else:
+            ready = local is not None and model in local
+            why = "" if ready else ("Ollama is not running" if local is None else f"not installed: ollama pull {model}")
         out.append({"id": mid, "name": f"{model} ({'Groq, cloud' if cloud else 'Ollama, on this computer'})",
                     "ready": ready, "why_not": why, "cloud": cloud, "accuracy": measured.get(mid)})
     return out

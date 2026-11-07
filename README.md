@@ -82,7 +82,7 @@ RCRV design summary.
 
 ```bash
 python -m pip install -e ".[copilot]"     # adds the Copilot's dependencies (embeddings, OCR, units)
-ollama pull llama3.2:3b                   # the local bot model (confidential mode)
+ollama pull qwen3:8b                      # the local bot model (confidential mode), ~5 GB
 python -m uvicorn ruletrace.app:app --port 8001
 ```
 Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s; it also downloads the Maritime

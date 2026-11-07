@@ -103,10 +103,13 @@ class Ollama:
         names = [t["name"] for t in tags]
         if self.model in names:
             return self.model
-        return next((n for n in names if n.split(":")[0] == self.model.split(":")[0]), self.model)
+        same = next((n for n in names if n.split(":")[0] == self.model.split(":")[0]), None)
+        # the chosen model is not pulled: use an installed one, and say which (label) rather than fail
+        return same or next(iter(names), self.model)
 
     def complete(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 900) -> str:
         model = self._resolve_model()
+        self.used = model
         try:
             r = httpx.post(
                 f"{self.base_url.rstrip('/')}/api/chat",
@@ -114,7 +117,10 @@ class Ollama:
                     "model": model,
                     "messages": messages,
                     "stream": False,
-                    "options": {"temperature": temperature, "num_predict": max_tokens},
+                    # Ollama's default context (4096 tokens) silently cuts a prompt with many clauses
+                    "options": {"temperature": temperature, "num_predict": max_tokens,
+                                "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "16384"))},
+                    "think": os.getenv("OLLAMA_THINK", "0") == "1",  # qwen3 etc.: answer without a thinking pass
                 },
                 timeout=self.timeout,
             )
@@ -129,7 +135,7 @@ class Ollama:
 
     @property
     def label(self) -> str:
-        return f"ollama:{self.model}"
+        return f"ollama:{getattr(self, 'used', None) or self.model}"
 
 
 @dataclass
@@ -272,7 +278,7 @@ def make_provider(name: str):
     if name == "ollama":
         return Ollama(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            model=os.getenv("OLLAMA_MODEL", "llama3.2"),
+            model=os.getenv("OLLAMA_MODEL", "qwen3:8b"),  # measured most accurate local model (eval/run.py)
             timeout=float(os.getenv("OLLAMA_TIMEOUT", "90")),
         )
     raise ValueError(f"Unknown LLM provider '{name}' (use groq, gemini, openai or ollama)")
