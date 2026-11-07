@@ -1,6 +1,8 @@
 """API tests for the local-LLM endpoints, with a fake model (Ollama not needed)."""
 import json
 
+import pytest
+
 from ruletrace import llm_api
 from tests.conftest import CEO, ENG
 
@@ -18,6 +20,14 @@ class Fake:
         return {"model": "fake", "reachable": True, "model_pulled": True, "message": "ok"}
 
 
+@pytest.fixture(autouse=True)
+def _fresh_explain_cache():
+    """The server keeps accepted explanations in memory; every test starts with an empty cache."""
+    llm_api._EXPLAIN_CACHE.clear()
+    yield
+    llm_api._EXPLAIN_CACHE.clear()
+
+
 def _design(client):
     return client.post("/ruletrace/designs/sample/demo_cruise_deck7", headers=ENG).json()["id"]
 
@@ -33,6 +43,11 @@ def test_explain_uses_model_or_falls_back_and_is_audited(client, monkeypatch):
     r = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG, json={"limit": 3}).json()
     assert r["counts"]["fail"] >= 1 and 1 <= len(r["explanations"]) <= 3
     assert all(e["source"] == "fake:test" and e["parts"]["fix"] is not None for e in r["explanations"])
+    # a repeat of the same request is served from the cache, even if the model would now fail
+    monkeypatch.setattr(llm_api, "get_client", lambda: Fake("not json"))
+    again = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG, json={"limit": 3}).json()
+    assert all(e.get("cached") and e["source"] == "fake:test" for e in again["explanations"])
+    llm_api._EXPLAIN_CACHE.clear()
     monkeypatch.setattr(llm_api, "get_client", lambda: Fake('{"requirement": "123456 mm", "design_state": "x"}'))
     r2 = client.post(f"/ruletrace/designs/{did}/explain", headers=ENG, json={"limit": 2}).json()
     assert all(e["source"] == "rules" for e in r2["explanations"])

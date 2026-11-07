@@ -115,6 +115,27 @@ def test_draft_rejects_direction_mismatch_and_bad_requirement_words():
     assert any("must start with" in p for p in out["drafts"][0]["problems"])
 
 
+def test_draft_rejects_ratio_in_requirement_but_accepts_slope_max():
+    text = "Ramp runs shall have a running slope not steeper than 1:12."
+    reply = json.loads(draft_reply(quote=text))
+    reply["rules"][0]["target"] = {"type": "ramp"}
+    reply["rules"][0]["check"] = {"property": "running_slope", "requirement": "at most 1:12"}
+    out = la.draft_rule(Fake(json.dumps(reply)), text)
+    assert not out["drafts"][0]["ok"] and any("slope_max" in p for p in out["drafts"][0]["problems"])
+    reply["rules"][0]["check"] = {"property": "running_slope", "slope_max": "1:12"}
+    assert la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"]
+    for ok_req in ("at least 7.5 m2", "at least 900 mm", "at most 2", "at least 4,5 m\u00b2"):
+        reply["rules"][0]["check"] = {"property": "x", "requirement": ok_req}
+        assert la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"], ok_req
+    reply["rules"][0]["check"] = {"property": "x", "requirement": "at most about 1 metre"}
+    assert not la.draft_rule(Fake(json.dumps(reply)), text)["drafts"][0]["ok"]
+
+
+def test_model_declining_is_reported_not_treated_as_a_draft():
+    out = la.draft_rule(Fake(json.dumps({"rules": [], "unclear": "no testable condition"})), TEXT)
+    assert out["drafts"] == [] and out["unclear"] == "no testable condition" and out["yaml"] == ""
+
+
 def test_vocabulary_and_new_name_warnings_and_exception_warning():
     rules = [{"target": {"type": "stair", "when": {"escape_route": True}}, "check": {"property": "clear_width"}}]
     vocab = la.rule_vocabulary(rules)

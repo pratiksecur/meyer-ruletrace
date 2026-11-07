@@ -253,6 +253,7 @@ PROCEDURE
    snake_case name only if nothing fits, and then list it in "new_names".
 5. Write the requirement using ONLY numbers and units that appear in the quote. "not less than 900 mm"
    becomes "at least 900 mm". "not more than" becomes "at most". Never convert units or do arithmetic.
+   Ratios such as 1:12 are not numbers with units: write them with "slope_max", never with "requirement".
 6. If the sentence has exceptions or conditions you cannot express ("except where", "unless", "having regard
    to"), skip that sentence and say why in "unclear". Never silently drop a condition.
 7. If nothing is testable, return {"rules": [], "unclear": "<why>"}.
@@ -317,6 +318,11 @@ def validate_draft(rule: dict, source_text: str, existing_ids: set[str],
         req = str(check.get("requirement", ""))
         if req and not re.match(r"\s*(at least|at most|exactly)\b", req):
             problems.append("requirement must start with 'at least', 'at most' or 'exactly'")
+        elif req and ":" in req:
+            problems.append("ratios like 1:12 must use 'slope_max', not 'requirement' (the engine would compare only "
+                            "the first number and pass every slope)")
+        elif req and not re.fullmatch(r"\s*(at least|at most|exactly)\s+\d+(?:[.,]\d+)?\s*(?:[A-Za-z%°][A-Za-z0-9%°²³/]*)?\s*", req):
+            problems.append("requirement must be '<at least|at most|exactly> <number> <unit>'")
         low = quote.lower()
         if req.startswith("at least") and re.search(r"not more than|no more than|maximum|not exceed", low) \
                 and not re.search(r"not less than|no less than|at least|minimum", low):
