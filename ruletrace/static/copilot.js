@@ -36,6 +36,7 @@ document.body.insertAdjacentHTML("beforeend", `
     <button data-tab="browse">Browse</button><button data-tab="read" title="Optional: needs GEMINI_API_KEY">Gemini <span class="opt">optional</span></button>
     <button data-tab="acc">Accuracy</button></div>
   <div class="body">
+    <div class="conf" id="cpConf"></div>
     <div class="state" id="cpState">Checking the Copilot…</div>
     <section id="tab-ask">
       <textarea id="cpQ" rows="3" placeholder="Ask anything. Rule questions are answered from the loaded regulations with checked citations; other questions get a labelled general answer."></textarea>
@@ -79,6 +80,7 @@ document.body.insertAdjacentHTML("beforeend", `
         <b>drawing</b> (PDF page, scanned drawings too). Gemini reads it; code confirms every reading on the image.</div>
       <input type="file" id="cpFile" accept=".png,.jpg,.jpeg,.webp,.pdf" style="width:100%;margin-top:8px">
       <div class="row" id="cpPageRow" hidden><label class="small">Page</label><input type="number" id="cpPage" min="1" value="1"></div>
+      <div class="warnline" id="cpGemOff" hidden></div>
       <button class="primary" id="cpRead" style="width:100%;margin-top:8px">Read with Gemini</button>
       <div id="cpOut"></div>
     </section>
@@ -112,7 +114,13 @@ async function refresh() {
     $c("#cpBuild").onclick = build; return;
   }
   const docs = status.documents.map(d => `${esc(d.doc)} (${d.clauses} clauses)`).join(" · ");
-  $c("#cpState").innerHTML = `<b>Full texts:</b> ${docs}<br>Bot: ${esc(status.provider)} · Gemini (optional, drawings only): ${status.gemini ? "ready" : "not set"}`;
+  $c("#cpState").innerHTML = `<b>Full texts:</b> ${docs}<br>Bot: ${esc(status.provider)} · Gemini (optional, drawings only): ${status.gemini ? "ready" : status.confidential ? "off" : "not set"}`;
+  $c("#cpConf").innerHTML = status.confidential
+    ? `<b>🔒 Confidential mode</b>: nothing leaves this computer. Answers come from the local Ollama model; Groq and Gemini are off.`
+    : `<b>⚠ Cloud models allowed</b>: questions go to Groq${status.gemini ? ", drawings and pictures to Google Gemini" : ""}. Use only for public documents, never for Meyer designs.`;
+  $c("#cpConf").className = status.confidential ? "conf on" : "conf off";
+  $c("#cpGemOff").hidden = status.gemini; $c("#cpGemOff").textContent = status.gemini_off || "";
+  $c("#cpRead").disabled = !status.gemini;
   if (!$c("#cpDocs").dataset.done) {
     const boxes = status.documents.map(d => `<label><input type="checkbox" value="${esc(d.doc)}" checked> ${esc(d.doc)}</label>`).join("");
     $c("#cpDocs").innerHTML = boxes; $c("#cpCheckDocs").innerHTML = boxes;
@@ -121,7 +129,7 @@ async function refresh() {
     $c("#cpDocs").dataset.done = "1";
     const pct = v => v == null ? "?" : Math.round(v * 100) + "%";
     $c("#cpModel").innerHTML = (status.models || []).map(m => `<option value="${esc(m.id)}" ${m.ready ? "" : "disabled"}>${esc(m.name)}${
-      m.accuracy ? ` · ${pct(m.accuracy.verified)} verified` : m.id === "auto" ? "" : " · not measured"}${m.ready ? "" : " (no key)"}</option>`).join("");
+      m.accuracy ? ` · ${pct(m.accuracy.verified)} verified` : m.id === "auto" ? "" : " · not measured"}${m.ready ? "" : ` (${m.why_not || "unavailable"})`}</option>`).join("");
     const accLine = () => { const m = (status.models || []).find(x => x.id === $c("#cpModel").value);
       $c("#cpModelAcc").innerHTML = m?.accuracy ? `Measured on 38 test questions: ${pct(m.accuracy.verified)} of answers passed every check,
         ${pct(m.accuracy.citation_precision)} of citations support their sentence, ${pct(m.accuracy.correct_not_found)} correct "not found". Answers that fail the checks are never shown as answers.`

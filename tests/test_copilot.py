@@ -324,3 +324,38 @@ def test_mlc_parser_and_limits():
     area = [validate(r, cl["A3.1/9(f)"], i, "regex")[0] for i, r in enumerate(extract_regex(cl["A3.1/9(f)"]))]
     assert [(x.value, x.condition) for x in area] == [(4.5, "in ships of less than 3,000 gross tonnage"),
         (5.5, "in ships of 3,000 gross tonnage or over but less than 10,000 gross tonnage")]
+
+
+def test_confidential_mode_is_the_default_and_keeps_everything_local(indexed, monkeypatch):
+    from ruletrace import copilot_api
+
+    monkeypatch.delenv("COPILOT_CONFIDENTIAL", raising=False)
+    assert copilot_api.confidential() and copilot_api.provider() == "ollama"
+    monkeypatch.setenv("GEMINI_API_KEY", "set-but-must-be-ignored")
+    monkeypatch.setenv("GROQ_API_KEY", "set-but-must-be-ignored")
+    s = indexed.get("/ruletrace/copilot/status", headers=ENG).json()
+    assert s["confidential"] and not s["gemini"] and s["provider"] == "ollama"
+    cloud = [m for m in s["models"] if m.get("cloud")]
+    assert cloud and not any(m["ready"] for m in cloud)
+    # Gemini refused even with a key, for drawings and for pictures
+    r = indexed.post("/ruletrace/copilot/read", headers=ENG, files={"file": ("a.png", b"x", "image/png")})
+    assert r.status_code == 403 and "Confidential" in r.json()["detail"]
+    r = indexed.post("/ruletrace/copilot/check/file", headers=ENG, files={"file": ("a.png", b"x", "image/png")})
+    assert r.status_code == 403
+    import pytest as _pt
+    from fastapi import HTTPException
+
+    with _pt.raises(HTTPException):
+        copilot_api.vision_llm()
+    # a cloud model cannot be chosen
+    r = indexed.post("/ruletrace/copilot/ask", headers=ENG,
+                     json={"question": "What clear width must an accessible door have?", "model": "groq:openai/gpt-oss-120b"})
+    assert r.status_code == 403
+    # the bot answers with the local model only
+    import rulemate.llm
+
+    used = []
+    monkeypatch.setattr(rulemate.llm, "get_llm", lambda spec=None: used.append(spec) or FakeLLM(
+        "Door openings shall provide a clear width of 32 inches minimum [36CFR1191AppD § 404.2.3]."))
+    a = indexed.post("/ruletrace/copilot/ask", headers=ENG, json={"question": "What clear width must an accessible door have?"})
+    assert a.status_code == 200 and used == ["ollama"]

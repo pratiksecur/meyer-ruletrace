@@ -82,15 +82,23 @@ RCRV design summary.
 
 ```bash
 python -m pip install -e ".[copilot]"     # adds the Copilot's dependencies (embeddings, OCR, units)
-# .env (git-ignored): GROQ_API_KEY=... (bot; free)  optional: GEMINI_API_KEY=... (drawings only), COPILOT_LLM_PROVIDER=groq,ollama
+ollama pull llama3.2:3b                   # the local bot model (confidential mode)
 python -m uvicorn ruletrace.app:app --port 8001
 ```
-Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s). The bot answers with Groq (if
-`GROQ_API_KEY` is set, free), then the local Ollama model; it never uses Gemini. **Gemini is optional** and only
-reads drawings and pictures. **Free Gemini keys are enough:** they allow about 20 requests per model per day, so the Copilot rotates over nine free flash models
-(`rulemate/llm.py`, `GEMINI_FREE_MODELS`) and skips one for the day when its quota is used up; that is roughly 180
-requests a day. Readings are cached per image under `VARTIJA_UPLOAD_DIR/copilot`, so a warmed-up demo makes no calls. For confidential designs use
-Gemini on Vertex AI in an EU region, or leave the key unset (everything except reading drawings works without it).
+Open the viewer, click **✦ Copilot**, then *Build the index* once (about 30 s; it also downloads the Maritime
+Labour Convention 2006 from the ILO, which is not committed: `scripts/fetch_mlc.py` does the same offline-first).
+
+**Confidential mode is ON by default (for Meyer designs): nothing leaves this computer.** The bot answers with the
+local Ollama model only; Groq and Gemini are off even if their keys are set (the server refuses them, and the panel
+shows *🔒 Confidential mode*). Retrieval, OCR, unit conversion and every PASS / FAIL always run locally. For
+confidential work keep **no Gemini key** in `.env`.
+
+Only for public documents and demos, cloud models can be allowed in `.env` (git-ignored):
+`COPILOT_CONFIDENTIAL=0`, `GROQ_API_KEY=...` (bot, free; then you can choose among three Groq models and see each
+one's measured accuracy), and optionally `GEMINI_API_KEY=...` (reads drawings and pictures only). The panel then
+shows *⚠ Cloud models allowed*. Free Gemini keys allow about 20 requests per model per day; the Copilot rotates over
+the free flash models (`rulemate/llm.py`, `GEMINI_FREE_MODELS`), and readings are cached per image under
+`VARTIJA_UPLOAD_DIR/copilot`.
 
 Code: `ruletrace/copilot_api.py` (endpoints, added like `llm_api.py`), `ruletrace/static/copilot.js` / `.css` (panel),
 `rulemate/` (retrieval, answer checks, rule-text parsers, unit-aware checks, Gemini readers), `tests/test_copilot.py`.

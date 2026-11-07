@@ -30,6 +30,10 @@ RuleTrace design: findings still come from the rule engine. It adds two things t
 Gemini is optional and kept apart: it only reads drawings and pictures (GEMINI_API_KEY). Without it, everything
 else works.
 
+Confidential mode (COPILOT_CONFIDENTIAL, default ON, for Meyer designs): nothing leaves this computer. The bot uses
+only the local Ollama model, and Gemini and Groq are off even if their keys are set. Retrieval, OCR, unit checks and
+verdicts always run locally. COPILOT_CONFIDENTIAL=0 is for public documents and demos only.
+
 The regulation texts are in ruletrace/copilot_rules/: 46 CFR Part 190 and the ADA/ABA technical requirements
 (36 CFR 1191 App. D), public domain and in git; the Maritime Labour Convention 2006 (ILO) is downloaded from the
 ILO when the index is built (scripts/fetch_mlc.py) and not committed. The index and caches live under VARTIJA_UPLOAD_DIR/copilot (git-ignored).
@@ -95,6 +99,23 @@ def configure(upload_dir: Path) -> Path:
 
 
 BOT_PROVIDERS = "groq,ollama"
+
+
+def confidential() -> bool:
+    """Confidential mode (default ON, for Meyer designs): nothing leaves this computer. The bot uses only the local
+    Ollama model and Gemini is off, even if keys are set. COPILOT_CONFIDENTIAL=0 allows Groq and Gemini (public
+    documents, demos)."""
+    return os.getenv("COPILOT_CONFIDENTIAL", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def gemini_enabled() -> bool:
+    return not confidential() and bool(os.getenv("GEMINI_API_KEY"))
+
+
+def gemini_off_reason() -> str:
+    return ("Confidential mode: Gemini is off so drawings and pictures never leave this computer "
+            "(set COPILOT_CONFIDENTIAL=0 only for public documents)" if confidential()
+            else "set GEMINI_API_KEY in .env to read drawings and pictures (optional)")
 # models the user can choose in Ask (Groq free tier and the local Ollama model); never Gemini
 BOT_MODELS = [("groq", "openai/gpt-oss-120b"), ("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"),
               ("ollama", os.getenv("OLLAMA_MODEL", "llama3.2:3b"))]
@@ -108,12 +129,16 @@ def bot_models() -> list[dict]:
         measured = {m["id"]: m for m in json.loads((RULES / "accuracy.json").read_text(encoding="utf-8")).get("models", [])}
     except (OSError, ValueError):
         pass
-    out = [{"id": "auto", "name": "Automatic (Groq, then local Ollama)", "ready": True}]
+    conf = confidential()
+    out = [{"id": "auto", "name": "Automatic (local Ollama)" if conf else "Automatic (Groq, then local Ollama)",
+            "ready": True}]
     for prov, model in BOT_MODELS:
         mid = f"{prov}:{model}"
-        ready = bool(os.getenv("GROQ_API_KEY")) if prov == "groq" else True
-        out.append({"id": mid, "name": f"{model} ({'Groq, cloud' if prov == 'groq' else 'Ollama, on this computer'})",
-                    "ready": ready, "accuracy": measured.get(mid)})
+        cloud = prov == "groq"
+        ready = (not conf and bool(os.getenv("GROQ_API_KEY"))) if cloud else True
+        why = "" if ready else ("off in confidential mode" if conf else "no GROQ_API_KEY")
+        out.append({"id": mid, "name": f"{model} ({'Groq, cloud' if cloud else 'Ollama, on this computer'})",
+                    "ready": ready, "why_not": why, "cloud": cloud, "accuracy": measured.get(mid)})
     return out
 
 
@@ -127,6 +152,8 @@ def bot_llm(choice: str | None):
     if choice not in allowed:
         raise HTTPException(400, f"unknown model {choice!r}; choose one of: auto, {', '.join(allowed)}")
     prov, model = allowed[choice]
+    if prov != "ollama" and confidential():
+        raise HTTPException(403, "Confidential mode: only the local Ollama model may answer; nothing leaves this computer")
     llm = make_provider(prov)
     llm.model = model
     if prov == "ollama":
@@ -135,7 +162,10 @@ def bot_llm(choice: str | None):
 
 
 def provider() -> str:
-    """The chat bot uses Groq, then the local Ollama model; never Gemini (kept for reading drawings only)."""
+    """The chat bot uses Groq, then the local Ollama model; never Gemini (kept for reading drawings only).
+    In confidential mode only Ollama."""
+    if confidential():
+        return "ollama"
     names = [n.strip() for n in os.getenv("COPILOT_LLM_PROVIDER", BOT_PROVIDERS).split(",")
              if n.strip() and n.strip().lower() != "gemini"]
     return ",".join(names) or BOT_PROVIDERS
@@ -144,6 +174,8 @@ def provider() -> str:
 def vision_llm():
     from rulemate.llm import make_provider
 
+    if confidential():  # second guard: no code path may reach Gemini in confidential mode
+        raise HTTPException(403, gemini_off_reason())
     llm = make_provider("gemini")  # rotates over the free flash models when one's daily quota is used up
     if os.getenv("GEMINI_VISION_MODEL"):
         llm.model = os.getenv("GEMINI_VISION_MODEL")
@@ -253,7 +285,8 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
         except HTTPException as e:
             return {"installed": False, "message": e.detail}
         out = {"installed": True, "index": _index_ready(), "provider": provider(),
-               "gemini": bool(os.getenv("GEMINI_API_KEY")), "gemini_role": "optional: reads drawings and pictures only",
+               "confidential": confidential(), "gemini": gemini_enabled(), "gemini_off": gemini_off_reason(),
+               "gemini_role": "optional: reads drawings and pictures only",
                "models": bot_models(),
                "documents": []}
         if out["index"]:
@@ -311,6 +344,7 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
                                       "cited": [c.uid for c in a.citations],
                                       "general": bool(general and general["ok"]),
                                       "general_model": general["model"] if general else "", "chosen_model": body.model or "auto",
+                                      "confidential": confidential(),
                                       "general_refs": [(r["source"], r["status"]) for r in general["references"]]
                                       if general and general["ok"] else []})
         return {"question": a.question, "status": a.status, "badge": a.badge, "text": a.text, "model": a.model,
@@ -418,9 +452,9 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
             raise HTTPException(413, "file too large")
         name = Path(file.filename or "upload").name
         needs_gemini = not name.lower().endswith(".csv")
-        llm = vision_llm() if needs_gemini and os.getenv("GEMINI_API_KEY") else None
+        llm = vision_llm() if needs_gemini and gemini_enabled() else None
         if needs_gemini and llm is None and not name.lower().endswith(".pdf"):
-            raise HTTPException(503, "set GEMINI_API_KEY in .env to read values from pictures")
+            raise HTTPException(403 if confidential() else 503, gemini_off_reason())
         try:
             fv = values_from_file(data, name, llm=llm, page=page)
         except Exception as exc:  # Gemini quota or busy, unreadable file, bad page: say so in plain words
@@ -454,8 +488,8 @@ def add_copilot_routes(app, router, engineer, path_of, save) -> None:
     async def read(file: UploadFile = File(...), page: int = Form(default=1), docs: str = Form(default=""),
                    who: Principal = Depends(engineer)) -> dict:
         _require()
-        if not os.getenv("GEMINI_API_KEY"):
-            raise HTTPException(503, "set GEMINI_API_KEY in .env to read drawings and pictures")
+        if not gemini_enabled():
+            raise HTTPException(403 if confidential() else 503, gemini_off_reason())
         data = await file.read()
         if len(data) > app.state.settings.max_upload_mb * 1024 * 1024:
             raise HTTPException(413, "file too large")
