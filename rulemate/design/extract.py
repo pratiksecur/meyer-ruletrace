@@ -111,7 +111,7 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
-MAX_PX = 7200  # longest side of a rendered sheet for OCR
+MAX_PX = 5000  # longest side of a rendered sheet for OCR (7000+ px sheets crashed the OCR engine: out of memory)
 TILE = 2000  # pixels; OCR shrinks large images, so big sheets are also read in overlapping tiles
 OVERLAP = 500
 SINGLE_PASS_MAX = 3600
@@ -144,8 +144,17 @@ def ocr_page(path: Path, page_no: int, dpi: int = DPI) -> list[Word]:
                             round(float(sc), 3)))
         return out
 
-    words = run(img, 0, 0)  # whole page: titles and large text
-    if max(H, W) > SINGLE_PASS_MAX:  # big sheet: small labels need tiles; keep whole-page words where they overlap
+    big = max(H, W) > SINGLE_PASS_MAX
+    # small sheet: one pass; big sheet: tiles only (a whole-page pass on a large image is the memory spike),
+    # plus one pass on a half-size copy for titles and large text
+    if big:
+        from PIL import Image
+
+        half = np.array(Image.fromarray(img).resize((W // 2, H // 2)))
+        words = [Word(w.text, w.x0 * 2, w.y0 * 2, w.x1 * 2, w.y1 * 2, w.score) for w in run(half, 0, 0)]
+    else:
+        words = run(img, 0, 0)
+    if big:  # small labels need tiles; keep the half-size words where they overlap
         tiled: list[Word] = []
         step = TILE - OVERLAP
         for ty in range(0, max(1, H - OVERLAP), step):
